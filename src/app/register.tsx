@@ -1,15 +1,20 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { AppButton } from '../components/ui/AppButton';
@@ -20,6 +25,13 @@ const VALID_ROLES = ['student', 'tutor', 'admin'];
 
 export default function Register() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+
+  // Input refs for keyboard chaining
+  const emailRef = useRef<TextInput>(null);
+  const facultyRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
+  const confirmPasswordRef = useRef<TextInput>(null);
 
   // Form input states
   const [name, setName] = useState('');
@@ -75,7 +87,8 @@ export default function Register() {
     !loading;
 
   const handleRegister = async () => {
-    // Inline validation feedback
+    Keyboard.dismiss();
+
     let hasError = false;
 
     if (!isNameValid) {
@@ -154,163 +167,192 @@ export default function Register() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.keyboardContainer}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
-    >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        automaticallyAdjustKeyboardInsets={true}
-        showsVerticalScrollIndicator={false}
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+      <KeyboardAvoidingView
+        style={styles.keyboardContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 40 : 0}
       >
-        {/* Top Header Section */}
-        <View style={styles.header}>
-          <View style={styles.logoCircle}>
-            <Ionicons name="person-add" size={36} color={colors.primary} />
-          </View>
-          <Text style={styles.appName}>Create Account</Text>
-          <Text style={styles.tagline}>Join PeerTutor as a student or tutor</Text>
-        </View>
-
-        {/* Card Section */}
-        <View style={styles.card}>
-          {/* Role Selection Cards */}
-          <Text style={styles.sectionLabel}>I want to:</Text>
-          <View style={styles.roleContainer}>
-            <Pressable
-              onPress={() => setRole('student')}
-              accessibilityRole="button"
-              accessibilityLabel="I need a tutor"
-              style={[
-                styles.roleCard,
-                role === 'student' && styles.roleCardActive,
-              ]}
-            >
-              <Ionicons
-                name="school-outline"
-                size={22}
-                color={role === 'student' ? colors.primary : colors.mutedText}
-              />
-              <Text
-                style={[
-                  styles.roleText,
-                  role === 'student' && styles.roleTextActive,
-                ]}
-              >
-                I need a tutor
-              </Text>
-            </Pressable>
-
-            <Pressable
-              onPress={() => setRole('tutor')}
-              accessibilityRole="button"
-              accessibilityLabel="I want to tutor"
-              style={[
-                styles.roleCard,
-                role === 'tutor' && styles.roleCardActive,
-              ]}
-            >
-              <Ionicons
-                name="book-outline"
-                size={22}
-                color={role === 'tutor' ? colors.primary : colors.mutedText}
-              />
-              <Text
-                style={[
-                  styles.roleText,
-                  role === 'tutor' && styles.roleTextActive,
-                ]}
-              >
-                I want to tutor
-              </Text>
-            </Pressable>
+        <StatusBar style="dark" />
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            {
+              paddingTop: Math.max(insets.top + 16, 36),
+              paddingBottom: Math.max(insets.bottom + 24, 60),
+            },
+          ]}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={true}
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Top Header Section */}
+          <View style={styles.header}>
+            <View style={styles.logoCircle}>
+              <Ionicons name="person-add" size={36} color={colors.primary} />
+            </View>
+            <Text style={styles.appName}>Create Account</Text>
+            <Text style={styles.tagline}>Join PeerTutor as a student or tutor</Text>
           </View>
 
-          {/* Form Fields */}
-          <AppInput
-            label="Full Name"
-            value={name}
-            onChangeText={(text) => {
-              setName(text);
-              if (nameError) setNameError('');
-            }}
-            placeholder="John Doe"
-            icon="person-outline"
-            error={nameError}
-          />
+          {/* Card Section */}
+          <View style={styles.card}>
+            {/* Role Selection Cards */}
+            <Text style={styles.sectionLabel}>I want to:</Text>
+            <View style={styles.roleContainer}>
+              <Pressable
+                onPress={() => setRole('student')}
+                accessibilityRole="button"
+                accessibilityLabel="I need a tutor"
+                style={[
+                  styles.roleCard,
+                  role === 'student' && styles.roleCardActive,
+                ]}
+              >
+                <Ionicons
+                  name="school-outline"
+                  size={22}
+                  color={role === 'student' ? colors.primary : colors.mutedText}
+                />
+                <Text
+                  style={[
+                    styles.roleText,
+                    role === 'student' && styles.roleTextActive,
+                  ]}
+                >
+                  I need a tutor
+                </Text>
+              </Pressable>
 
-          <AppInput
-            label="Email"
-            value={email}
-            onChangeText={(text) => {
-              setEmail(text);
-              if (emailError) setEmailError('');
-            }}
-            placeholder="student@university.ac.uk"
-            keyboardType="email-address"
-            icon="mail-outline"
-            error={emailError}
-          />
+              <Pressable
+                onPress={() => setRole('tutor')}
+                accessibilityRole="button"
+                accessibilityLabel="I want to tutor"
+                style={[
+                  styles.roleCard,
+                  role === 'tutor' && styles.roleCardActive,
+                ]}
+              >
+                <Ionicons
+                  name="book-outline"
+                  size={22}
+                  color={role === 'tutor' ? colors.primary : colors.mutedText}
+                />
+                <Text
+                  style={[
+                    styles.roleText,
+                    role === 'tutor' && styles.roleTextActive,
+                  ]}
+                >
+                  I want to tutor
+                </Text>
+              </Pressable>
+            </View>
 
-          <AppInput
-            label="Faculty (Optional)"
-            value={faculty}
-            onChangeText={setFaculty}
-            placeholder="e.g. Computing / Engineering"
-            icon="business-outline"
-          />
-
-          <AppInput
-            label="Password"
-            value={password}
-            onChangeText={(text) => {
-              setPassword(text);
-              if (passwordError) setPasswordError('');
-            }}
-            placeholder="At least 6 characters"
-            secureTextEntry
-            icon="lock-closed-outline"
-            error={passwordError}
-          />
-
-          <AppInput
-            label="Confirm Password"
-            value={confirmPassword}
-            onChangeText={(text) => {
-              setConfirmPassword(text);
-              if (confirmPasswordError) setConfirmPasswordError('');
-            }}
-            placeholder="Re-enter your password"
-            secureTextEntry
-            icon="shield-checkmark-outline"
-            error={confirmPasswordError}
-          />
-
-          <View style={styles.buttonContainer}>
-            <AppButton
-              title="Create Account"
-              onPress={handleRegister}
-              loading={loading}
-              disabled={!isFormValid}
+            {/* Form Fields */}
+            <AppInput
+              label="Full Name"
+              value={name}
+              onChangeText={(text) => {
+                setName(text);
+                if (nameError) setNameError('');
+              }}
+              placeholder="John Doe"
+              returnKeyType="next"
+              onSubmitEditing={() => emailRef.current?.focus()}
+              blurOnSubmit={false}
+              icon="person-outline"
+              error={nameError}
             />
-          </View>
-        </View>
 
-        {/* Bottom Back-to-Login Link */}
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>Already have an account? </Text>
-          <Pressable
-            onPress={() => router.back()}
-            accessibilityRole="button"
-            accessibilityLabel="Log in"
-          >
-            <Text style={styles.loginLink}>Log in</Text>
-          </Pressable>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+            <AppInput
+              inputRef={emailRef}
+              label="Email"
+              value={email}
+              onChangeText={(text) => {
+                setEmail(text);
+                if (emailError) setEmailError('');
+              }}
+              placeholder="student@university.ac.uk"
+              keyboardType="email-address"
+              returnKeyType="next"
+              onSubmitEditing={() => facultyRef.current?.focus()}
+              blurOnSubmit={false}
+              icon="mail-outline"
+              error={emailError}
+            />
+
+            <AppInput
+              inputRef={facultyRef}
+              label="Faculty (Optional)"
+              value={faculty}
+              onChangeText={setFaculty}
+              placeholder="e.g. Computing / Engineering"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordRef.current?.focus()}
+              blurOnSubmit={false}
+              icon="business-outline"
+            />
+
+            <AppInput
+              inputRef={passwordRef}
+              label="Password"
+              value={password}
+              onChangeText={(text) => {
+                setPassword(text);
+                if (passwordError) setPasswordError('');
+              }}
+              placeholder="At least 6 characters"
+              secureTextEntry
+              returnKeyType="next"
+              onSubmitEditing={() => confirmPasswordRef.current?.focus()}
+              blurOnSubmit={false}
+              icon="lock-closed-outline"
+              error={passwordError}
+            />
+
+            <AppInput
+              inputRef={confirmPasswordRef}
+              label="Confirm Password"
+              value={confirmPassword}
+              onChangeText={(text) => {
+                setConfirmPassword(text);
+                if (confirmPasswordError) setConfirmPasswordError('');
+              }}
+              placeholder="Re-enter your password"
+              secureTextEntry
+              returnKeyType="done"
+              onSubmitEditing={handleRegister}
+              icon="shield-checkmark-outline"
+              error={confirmPasswordError}
+            />
+
+            <View style={styles.buttonContainer}>
+              <AppButton
+                title="Create Account"
+                onPress={handleRegister}
+                loading={loading}
+                disabled={!isFormValid}
+              />
+            </View>
+          </View>
+
+          {/* Bottom Back-to-Login Link */}
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>Already have an account? </Text>
+            <Pressable
+              onPress={() => router.back()}
+              accessibilityRole="button"
+              accessibilityLabel="Log in"
+              style={styles.linkTouchable}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Text style={styles.loginLink}>Log in</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </TouchableWithoutFeedback>
   );
 }
 
@@ -323,8 +365,6 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
     paddingHorizontal: 24,
-    paddingTop: 36,
-    paddingBottom: 80,
   },
   header: {
     alignItems: 'center',
@@ -381,7 +421,7 @@ const styles = StyleSheet.create({
     height: 52,
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: '#E0E8DF',
+    borderColor: colors.border,
     backgroundColor: colors.card,
   },
   roleCardActive: {
@@ -409,6 +449,10 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: 15,
     color: colors.mutedText,
+  },
+  linkTouchable: {
+    minHeight: 48,
+    justifyContent: 'center',
   },
   loginLink: {
     fontSize: 15,

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   KeyboardTypeOptions,
   Pressable,
+  ReturnKeyTypeOptions,
   StyleSheet,
   Text,
   TextInput,
@@ -17,6 +18,10 @@ interface AppInputProps {
   placeholder?: string;
   secureTextEntry?: boolean;
   keyboardType?: KeyboardTypeOptions;
+  returnKeyType?: ReturnKeyTypeOptions;
+  onSubmitEditing?: () => void;
+  blurOnSubmit?: boolean;
+  inputRef?: React.Ref<TextInput>;
   error?: string;
   icon?: keyof typeof Ionicons.glyphMap;
 }
@@ -28,6 +33,10 @@ export const AppInput: React.FC<AppInputProps> = ({
   placeholder,
   secureTextEntry = false,
   keyboardType = 'default',
+  returnKeyType,
+  onSubmitEditing,
+  blurOnSubmit,
+  inputRef,
   error,
   icon,
 }) => {
@@ -58,12 +67,16 @@ export const AppInput: React.FC<AppInputProps> = ({
 
         {/* Text Input */}
         <TextInput
+          ref={inputRef}
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
           placeholderTextColor={colors.mutedText}
           secureTextEntry={secureTextEntry ? hidePassword : false}
           keyboardType={keyboardType}
+          returnKeyType={returnKeyType}
+          onSubmitEditing={onSubmitEditing}
+          blurOnSubmit={blurOnSubmit}
           autoCapitalize="none"
           accessibilityLabel={label || placeholder || 'Text input'}
           style={styles.textInput}
@@ -76,6 +89,7 @@ export const AppInput: React.FC<AppInputProps> = ({
             accessibilityRole="button"
             accessibilityLabel={hidePassword ? 'Show password' : 'Hide password'}
             style={styles.eyeButton}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Ionicons
               name={hidePassword ? 'eye-outline' : 'eye-off-outline'}
@@ -108,7 +122,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#E0E8DF',
+    borderColor: colors.border,
     minHeight: 52,
     paddingHorizontal: 14,
     // Soft shadow
@@ -132,8 +146,8 @@ const styles = StyleSheet.create({
   },
   eyeButton: {
     padding: 8,
-    minWidth: 44,
-    minHeight: 44,
+    minWidth: 48,
+    minHeight: 48,
     justifyContent: 'center',
     alignItems: 'center',
   },

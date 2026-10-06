@@ -1,15 +1,20 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { AppButton } from '../components/ui/AppButton';
@@ -20,6 +25,10 @@ const VALID_ROLES = ['student', 'tutor', 'admin'];
 
 export default function Login() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+
+  // Input refs for keyboard navigation
+  const passwordInputRef = useRef<TextInput>(null);
 
   // Form states
   const [email, setEmail] = useState('');
@@ -55,6 +64,8 @@ export default function Login() {
   };
 
   const handleLogin = async () => {
+    Keyboard.dismiss();
+
     // Reset validation errors
     setEmailError('');
     setPasswordError('');
@@ -107,74 +118,91 @@ export default function Login() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.keyboardContainer}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+      <KeyboardAvoidingView
+        style={styles.keyboardContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        {/* Top Header Section */}
-        <View style={styles.header}>
-          <View style={styles.logoCircle}>
-            <Ionicons name="school" size={40} color={colors.primary} />
+        <StatusBar style="dark" />
+        <ScrollView
+          contentContainerStyle={[
+            styles.scrollContent,
+            {
+              paddingTop: Math.max(insets.top + 16, 36),
+              paddingBottom: Math.max(insets.bottom + 16, 36),
+            },
+          ]}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Top Header Section */}
+          <View style={styles.header}>
+            <View style={styles.logoCircle}>
+              <Ionicons name="school" size={40} color={colors.primary} />
+            </View>
+            <Text style={styles.appName}>PeerTutor</Text>
+            <Text style={styles.tagline}>Find trusted tutors for your modules</Text>
           </View>
-          <Text style={styles.appName}>PeerTutor</Text>
-          <Text style={styles.tagline}>Find trusted tutors for your modules</Text>
-        </View>
 
-        {/* Card Section */}
-        <View style={styles.card}>
-          <AppInput
-            label="Email"
-            value={email}
-            onChangeText={(text) => {
-              setEmail(text);
-              if (emailError) setEmailError('');
-            }}
-            placeholder="student@university.ac.uk"
-            keyboardType="email-address"
-            icon="mail-outline"
-            error={emailError}
-          />
-
-          <AppInput
-            label="Password"
-            value={password}
-            onChangeText={(text) => {
-              setPassword(text);
-              if (passwordError) setPasswordError('');
-            }}
-            placeholder="Enter your password"
-            secureTextEntry
-            icon="lock-closed-outline"
-            error={passwordError}
-          />
-
-          <View style={styles.buttonContainer}>
-            <AppButton
-              title="Login"
-              onPress={handleLogin}
-              loading={loading}
-              disabled={loading}
+          {/* Card Section */}
+          <View style={styles.card}>
+            <AppInput
+              label="Email"
+              value={email}
+              onChangeText={(text) => {
+                setEmail(text);
+                if (emailError) setEmailError('');
+              }}
+              placeholder="student@university.ac.uk"
+              keyboardType="email-address"
+              returnKeyType="next"
+              onSubmitEditing={() => passwordInputRef.current?.focus()}
+              blurOnSubmit={false}
+              icon="mail-outline"
+              error={emailError}
             />
-          </View>
-        </View>
 
-        {/* Bottom Navigation Link */}
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>New here? </Text>
-          <Pressable
-            onPress={() => router.push('/register' as any)}
-            accessibilityRole="button"
-            accessibilityLabel="Create an account"
-          >
-            <Text style={styles.registerLink}>Create an account</Text>
-          </Pressable>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+            <AppInput
+              inputRef={passwordInputRef}
+              label="Password"
+              value={password}
+              onChangeText={(text) => {
+                setPassword(text);
+                if (passwordError) setPasswordError('');
+              }}
+              placeholder="Enter your password"
+              secureTextEntry
+              returnKeyType="done"
+              onSubmitEditing={handleLogin}
+              icon="lock-closed-outline"
+              error={passwordError}
+            />
+
+            <View style={styles.buttonContainer}>
+              <AppButton
+                title="Login"
+                onPress={handleLogin}
+                loading={loading}
+                disabled={loading}
+              />
+            </View>
+          </View>
+
+          {/* Bottom Navigation Link */}
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>New here? </Text>
+            <Pressable
+              onPress={() => router.push('/register' as any)}
+              accessibilityRole="button"
+              accessibilityLabel="Create an account"
+              style={styles.linkTouchable}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Text style={styles.registerLink}>Create an account</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </TouchableWithoutFeedback>
   );
 }
 
@@ -187,7 +215,6 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     justifyContent: 'center',
     paddingHorizontal: 24,
-    paddingVertical: 36,
   },
   header: {
     alignItems: 'center',
@@ -217,7 +244,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: 16,
     padding: 20,
-    // Soft shadow
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
@@ -236,6 +262,10 @@ const styles = StyleSheet.create({
   footerText: {
     fontSize: 15,
     color: colors.mutedText,
+  },
+  linkTouchable: {
+    minHeight: 48,
+    justifyContent: 'center',
   },
   registerLink: {
     fontSize: 15,

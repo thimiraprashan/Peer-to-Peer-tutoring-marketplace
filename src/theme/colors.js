@@ -7,4 +7,7 @@ export const colors = {
   mutedText: '#6B7A6B',
   star: '#F5B301',
   error: '#D64545',
+  border: '#E0E8DF',
+  borderDark: '#D0DDD0',
+  overlay: 'rgba(0, 0, 0, 0.45)',
 };

@@ -12,6 +12,8 @@ import {
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import { Avatar } from '../../components/ui/Avatar';
@@ -30,6 +32,7 @@ const FILTER_SUBJECTS = ['IT', 'Business', 'Engineering'];
 
 export default function StudentHome() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user, profile } = useCurrentUser();
 
   // Search & filter state
@@ -60,8 +63,7 @@ export default function StudentHome() {
     try {
       const data = await getFeaturedTutors(subject);
       setTutors(data);
-    } catch (err: any) {
-      console.error('Error loading tutors:', err);
+    } catch {
       setTutorError('Unable to load tutors. Please check your connection.');
     } finally {
       setLoadingTutors(false);
@@ -76,8 +78,7 @@ export default function StudentHome() {
     try {
       const data = await getSavedModules(user.uid);
       setSavedModules(data);
-    } catch (err: any) {
-      console.error('Error loading saved modules:', err);
+    } catch {
       setModuleError('Could not load modules.');
     } finally {
       setLoadingModules(false);
@@ -172,7 +173,7 @@ export default function StudentHome() {
             try {
               await removeSavedModule(mod.id);
               loadSavedModules();
-            } catch (err: any) {
+            } catch {
               Alert.alert('Error', 'Could not remove module.');
             }
           },
@@ -185,331 +186,350 @@ export default function StudentHome() {
   const firstName = profile?.name ? profile.name.trim().split(' ')[0] : 'Student';
 
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={handleRefresh}
-          colors={[colors.primary]}
-          tintColor={colors.primary}
-        />
-      }
-    >
-      {/* 1. Header greeting area */}
-      <View style={styles.header}>
-        <View>
-          <Text style={styles.greetingText}>Hi {firstName} 👋</Text>
-          <Text style={styles.subGreetingText}>Ready to learn today?</Text>
-        </View>
-        <Pressable
-          onPress={() => router.push('/(student)/profile' as any)}
-          accessibilityRole="button"
-          accessibilityLabel="Open profile"
-        >
-          <Avatar name={profile?.name || 'Student'} size={48} />
-        </Pressable>
-      </View>
-
-      {/* 2 & 3. Hero Card with Search */}
-      <View style={styles.heroCard}>
-        <Text style={styles.heroHeading}>What do you need help with?</Text>
-
-        {/* Search Bar */}
-        <View style={styles.searchBar}>
-          <Ionicons
-            name="search-outline"
-            size={20}
-            color={colors.mutedText}
-            style={styles.searchIcon}
+    <View style={styles.screenWrapper}>
+      <StatusBar style="dark" />
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[
+          styles.scrollContent,
+          {
+            paddingTop: Math.max(insets.top + 12, 44),
+            paddingBottom: Math.max(insets.bottom + 84, 96),
+          },
+        ]}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            colors={[colors.primary]}
+            tintColor={colors.primary}
           />
-          <TextInput
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholder="Type module name (e.g., IT3010)"
-            placeholderTextColor={colors.mutedText}
-            returnKeyType="search"
-            onSubmitEditing={handleSearchSubmit}
-            accessibilityLabel="Search modules"
-            style={styles.searchInput}
-          />
+        }
+      >
+        {/* 1. Header greeting area */}
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.greetingText}>Hi {firstName} 👋</Text>
+            <Text style={styles.subGreetingText}>Ready to learn today?</Text>
+          </View>
+          <Pressable
+            onPress={() => router.push('/(student)/profile' as any)}
+            accessibilityRole="button"
+            accessibilityLabel="Open profile"
+            style={styles.avatarTouchable}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Avatar name={profile?.name || 'Student'} size={48} />
+          </Pressable>
         </View>
 
-        {/* 4. Horizontal filter chips */}
-        <View style={styles.chipsRow}>
-          {FILTER_SUBJECTS.map((subject) => {
-            const isSelected = selectedSubject === subject;
-            return (
-              <Pressable
-                key={subject}
-                onPress={() => handleChipPress(subject)}
-                accessibilityRole="button"
-                accessibilityLabel={`Filter by ${subject}`}
-                style={[
-                  styles.chip,
-                  isSelected ? styles.chipSelected : styles.chipOutline,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.chipText,
-                    isSelected ? styles.chipTextSelected : styles.chipTextOutline,
-                  ]}
-                >
-                  {subject}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
+        {/* 2 & 3. Hero Card with Search */}
+        <View style={styles.heroCard}>
+          <Text style={styles.heroHeading}>What do you need help with?</Text>
 
-      {/* NEW: My Modules Section */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>My Modules</Text>
-        <Pressable
-          onPress={() => {
-            setFormError({});
-            setModalVisible(true);
-          }}
-          accessibilityRole="button"
-          accessibilityLabel="Add module"
-          style={styles.addButton}
-        >
-          <Ionicons name="add" size={16} color={colors.primary} />
-          <Text style={styles.addButtonText}>Add</Text>
-        </Pressable>
-      </View>
-
-      {/* Saved Modules Horizontal List / Loading / Empty */}
-      {loadingModules ? (
-        <View style={styles.modulesLoading}>
-          <ActivityIndicator size="small" color={colors.primary} />
-        </View>
-      ) : moduleError ? (
-        <Text style={styles.moduleErrorText}>{moduleError}</Text>
-      ) : savedModules.length === 0 ? (
-        <View style={styles.emptyModulesCard}>
-          <Ionicons name="bookmark-outline" size={24} color={colors.mutedText} />
-          <Text style={styles.emptyModulesText}>
-            No saved modules yet. Tap + Add to save the ones you study.
-          </Text>
-        </View>
-      ) : (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.savedModulesRow}
-        >
-          {savedModules.map((mod) => (
-            <View key={mod.id} style={styles.savedModuleChip}>
-              <Pressable
-                onPress={() =>
-                  router.push({
-                    pathname: '/(student)/search',
-                    params: { q: mod.moduleCode },
-                  } as any)
-                }
-                accessibilityRole="button"
-                accessibilityLabel={`Search ${mod.moduleCode}`}
-                style={styles.savedModuleContent}
-              >
-                <Text style={styles.savedModuleCode}>{mod.moduleCode}</Text>
-                <Text style={styles.savedModuleDot}>·</Text>
-                <Text style={styles.savedModuleName} numberOfLines={1}>
-                  {mod.moduleName}
-                </Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => handleConfirmRemove(mod)}
-                accessibilityRole="button"
-                accessibilityLabel={`Remove ${mod.moduleCode}`}
-                style={styles.removeIconBtn}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Ionicons name="close" size={16} color={colors.mutedText} />
-              </Pressable>
-            </View>
-          ))}
-        </ScrollView>
-      )}
-
-      {/* 5. Tutors Section */}
-      <View style={[styles.sectionHeader, { marginTop: 12 }]}>
-        <Text style={styles.sectionTitle}>Tutors</Text>
-        <Pressable
-          onPress={() => router.push('/(student)/search' as any)}
-          accessibilityRole="button"
-          accessibilityLabel="See all tutors"
-        >
-          <Text style={styles.seeAllText}>See All →</Text>
-        </Pressable>
-      </View>
-
-      {/* Tutors loading / error / empty / list */}
-      {loadingTutors ? (
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-        </View>
-      ) : tutorError ? (
-        <View style={styles.stateCard}>
-          <Ionicons name="alert-circle-outline" size={36} color={colors.error} />
-          <Text style={styles.errorText}>{tutorError}</Text>
-          <View style={styles.retryButtonWrapper}>
-            <AppButton
-              title="Try again"
-              onPress={() => loadTutors(selectedSubject)}
-              variant="outline"
+          {/* Search Bar */}
+          <View style={styles.searchBar}>
+            <Ionicons
+              name="search-outline"
+              size={20}
+              color={colors.mutedText}
+              style={styles.searchIcon}
+            />
+            <TextInput
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholder="Type module name (e.g., IT3010)"
+              placeholderTextColor={colors.mutedText}
+              returnKeyType="search"
+              onSubmitEditing={handleSearchSubmit}
+              accessibilityLabel="Search modules"
+              style={styles.searchInput}
             />
           </View>
-        </View>
-      ) : tutors.length === 0 ? (
-        <View style={styles.stateCard}>
-          <Ionicons name="school-outline" size={40} color={colors.mutedText} />
-          <Text style={styles.emptyText}>No tutors found for this subject</Text>
-        </View>
-      ) : (
-        <View style={styles.tutorsList}>
-          {tutors.map((tutor) => (
-            <Pressable
-              key={tutor.tutorId}
-              onPress={() => {
-                // TODO: Navigate to tutor profile screen once implemented
-              }}
-              style={({ pressed }) => [
-                styles.tutorCard,
-                pressed && styles.tutorCardPressed,
-              ]}
-              accessibilityRole="button"
-              accessibilityLabel={`Tutor ${tutor.name}`}
-            >
-              <Avatar name={tutor.name} size={46} />
 
-              <View style={styles.tutorInfo}>
-                <Text style={styles.tutorName}>{tutor.name}</Text>
-                <View style={styles.ratingRow}>
-                  <Ionicons name="star" size={14} color={colors.star} />
-                  <Text style={styles.ratingText}>
-                    {Number(tutor.ratingAvg || 5).toFixed(1)}{' '}
-                    <Text style={styles.ratingCount}>
-                      ({tutor.ratingCount || 0})
+          {/* 4. Horizontal filter chips */}
+          <View style={styles.chipsRow}>
+            {FILTER_SUBJECTS.map((subject) => {
+              const isSelected = selectedSubject === subject;
+              return (
+                <Pressable
+                  key={subject}
+                  onPress={() => handleChipPress(subject)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Filter by ${subject}`}
+                  style={[
+                    styles.chip,
+                    isSelected ? styles.chipSelected : styles.chipOutline,
+                  ]}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                >
+                  <Text
+                    style={[
+                      styles.chipText,
+                      isSelected ? styles.chipTextSelected : styles.chipTextOutline,
+                    ]}
+                  >
+                    {subject}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* My Modules Section */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>My Modules</Text>
+          <Pressable
+            onPress={() => {
+              setFormError({});
+              setModalVisible(true);
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Add module"
+            style={styles.addButton}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="add" size={16} color={colors.primary} />
+            <Text style={styles.addButtonText}>Add</Text>
+          </Pressable>
+        </View>
+
+        {/* Saved Modules Horizontal List / Loading / Empty */}
+        {loadingModules ? (
+          <View style={styles.modulesLoading}>
+            <ActivityIndicator size="small" color={colors.primary} />
+          </View>
+        ) : moduleError ? (
+          <Text style={styles.moduleErrorText}>{moduleError}</Text>
+        ) : savedModules.length === 0 ? (
+          <View style={styles.emptyModulesCard}>
+            <Ionicons name="bookmark-outline" size={24} color={colors.mutedText} />
+            <Text style={styles.emptyModulesText}>
+              No saved modules yet. Tap + Add to save the ones you study.
+            </Text>
+          </View>
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.savedModulesRow}
+          >
+            {savedModules.map((mod) => (
+              <View key={mod.id} style={styles.savedModuleChip}>
+                <Pressable
+                  onPress={() =>
+                    router.push({
+                      pathname: '/(student)/search',
+                      params: { q: mod.moduleCode },
+                    } as any)
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={`Search ${mod.moduleCode}`}
+                  style={styles.savedModuleContent}
+                >
+                  <Text style={styles.savedModuleCode}>{mod.moduleCode}</Text>
+                  <Text style={styles.savedModuleDot}>·</Text>
+                  <Text style={styles.savedModuleName} numberOfLines={1}>
+                    {mod.moduleName}
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={() => handleConfirmRemove(mod)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${mod.moduleCode}`}
+                  style={styles.removeIconBtn}
+                  hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                >
+                  <Ionicons name="close" size={16} color={colors.mutedText} />
+                </Pressable>
+              </View>
+            ))}
+          </ScrollView>
+        )}
+
+        {/* 5. Tutors Section */}
+        <View style={[styles.sectionHeader, { marginTop: 12 }]}>
+          <Text style={styles.sectionTitle}>Tutors</Text>
+          <Pressable
+            onPress={() => router.push('/(student)/search' as any)}
+            accessibilityRole="button"
+            accessibilityLabel="See all tutors"
+            style={styles.seeAllTouchable}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Text style={styles.seeAllText}>See All →</Text>
+          </Pressable>
+        </View>
+
+        {/* Tutors loading / error / empty / list */}
+        {loadingTutors ? (
+          <View style={styles.centerContainer}>
+            <ActivityIndicator size="large" color={colors.primary} />
+          </View>
+        ) : tutorError ? (
+          <View style={styles.stateCard}>
+            <Ionicons name="alert-circle-outline" size={36} color={colors.error} />
+            <Text style={styles.errorText}>{tutorError}</Text>
+            <View style={styles.retryButtonWrapper}>
+              <AppButton
+                title="Try again"
+                onPress={() => loadTutors(selectedSubject)}
+                variant="outline"
+              />
+            </View>
+          </View>
+        ) : tutors.length === 0 ? (
+          <View style={styles.stateCard}>
+            <Ionicons name="school-outline" size={40} color={colors.mutedText} />
+            <Text style={styles.emptyText}>No tutors found for this subject</Text>
+          </View>
+        ) : (
+          <View style={styles.tutorsList}>
+            {tutors.map((tutor) => (
+              <Pressable
+                key={tutor.tutorId}
+                onPress={() => {
+                  // TODO: Navigate to tutor profile screen once implemented
+                }}
+                style={({ pressed }) => [
+                  styles.tutorCard,
+                  pressed && styles.tutorCardPressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={`Tutor ${tutor.name}`}
+              >
+                <Avatar name={tutor.name} size={48} />
+
+                <View style={styles.tutorInfo}>
+                  <Text style={styles.tutorName}>{tutor.name}</Text>
+                  <View style={styles.ratingRow}>
+                    <Ionicons name="star" size={14} color={colors.star} />
+                    <Text style={styles.ratingText}>
+                      {Number(tutor.ratingAvg || 5).toFixed(1)}{' '}
+                      <Text style={styles.ratingCount}>
+                        ({tutor.ratingCount || 0})
+                      </Text>
                     </Text>
+                  </View>
+                  <Text style={styles.moduleText} numberOfLines={1}>
+                    {tutor.moduleCode}
+                    {tutor.moduleName ? ` - ${tutor.moduleName}` : ''}
                   </Text>
                 </View>
-                <Text style={styles.moduleText} numberOfLines={1}>
-                  {tutor.moduleCode}
-                  {tutor.moduleName ? ` - ${tutor.moduleName}` : ''}
-                </Text>
-              </View>
 
-              {tutor.verified ? (
-                <View style={styles.badgeWrapper}>
-                  <VerifiedBadge />
-                </View>
-              ) : null}
-            </Pressable>
-          ))}
+                {tutor.verified ? (
+                  <View style={styles.badgeWrapper}>
+                    <VerifiedBadge />
+                  </View>
+                ) : null}
+              </Pressable>
+            ))}
+          </View>
+        )}
+
+        {/* 6. Upcoming Bookings Section */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Upcoming Bookings</Text>
         </View>
-      )}
+        {/* TODO: Member 2's bookings collection will feed this later */}
+        <View style={styles.bookingPlaceholderCard}>
+          <Ionicons
+            name="calendar-outline"
+            size={32}
+            color={colors.mutedText}
+            style={styles.calendarIcon}
+          />
+          <Text style={styles.bookingPlaceholderText}>
+            No upcoming bookings yet
+          </Text>
+        </View>
 
-      {/* 6. Upcoming Bookings Section */}
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Upcoming Bookings</Text>
-      </View>
-      {/* TODO: Member 2's bookings collection will feed this later */}
-      <View style={styles.bookingPlaceholderCard}>
-        <Ionicons
-          name="calendar-outline"
-          size={32}
-          color={colors.mutedText}
-          style={styles.calendarIcon}
-        />
-        <Text style={styles.bookingPlaceholderText}>
-          No upcoming bookings yet
-        </Text>
-      </View>
+        {/* Add Module Modal */}
+        <Modal
+          visible={modalVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Add My Module</Text>
 
-      {/* Add Module Modal */}
-      <Modal
-        visible={modalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Add My Module</Text>
+              {formError.general ? (
+                <Text style={styles.generalErrorText}>{formError.general}</Text>
+              ) : null}
 
-            {formError.general ? (
-              <Text style={styles.generalErrorText}>{formError.general}</Text>
-            ) : null}
+              <AppInput
+                label="Module Code"
+                value={newCode}
+                onChangeText={(txt) => {
+                  setNewCode(txt.toUpperCase());
+                  if (formError.code) setFormError((e) => ({ ...e, code: undefined }));
+                }}
+                placeholder="e.g. IT3010"
+                icon="book-outline"
+                returnKeyType="next"
+                error={formError.code}
+              />
 
-            <AppInput
-              label="Module Code"
-              value={newCode}
-              onChangeText={(txt) => {
-                setNewCode(txt.toUpperCase());
-                if (formError.code) setFormError((e) => ({ ...e, code: undefined }));
-              }}
-              placeholder="e.g. IT3010"
-              icon="book-outline"
-              error={formError.code}
-            />
+              <AppInput
+                label="Module Name"
+                value={newName}
+                onChangeText={(txt) => {
+                  setNewName(txt);
+                  if (formError.name) setFormError((e) => ({ ...e, name: undefined }));
+                }}
+                placeholder="e.g. Data Structures"
+                icon="document-text-outline"
+                returnKeyType="done"
+                onSubmitEditing={handleSaveModule}
+                error={formError.name}
+              />
 
-            <AppInput
-              label="Module Name"
-              value={newName}
-              onChangeText={(txt) => {
-                setNewName(txt);
-                if (formError.name) setFormError((e) => ({ ...e, name: undefined }));
-              }}
-              placeholder="e.g. Data Structures"
-              icon="document-text-outline"
-              error={formError.name}
-            />
-
-            <View style={styles.modalActions}>
-              <View style={styles.modalButtonFlex}>
-                <AppButton
-                  title="Cancel"
-                  onPress={() => {
-                    setModalVisible(false);
-                    setNewCode('');
-                    setNewName('');
-                    setFormError({});
-                  }}
-                  variant="outline"
-                  disabled={savingModule}
-                />
-              </View>
-              <View style={styles.modalButtonFlex}>
-                <AppButton
-                  title="Save"
-                  onPress={handleSaveModule}
-                  loading={savingModule}
-                  disabled={savingModule}
-                />
+              <View style={styles.modalActions}>
+                <View style={styles.modalButtonFlex}>
+                  <AppButton
+                    title="Cancel"
+                    onPress={() => {
+                      setModalVisible(false);
+                      setNewCode('');
+                      setNewName('');
+                      setFormError({});
+                    }}
+                    variant="outline"
+                    disabled={savingModule}
+                  />
+                </View>
+                <View style={styles.modalButtonFlex}>
+                  <AppButton
+                    title="Save"
+                    onPress={handleSaveModule}
+                    loading={savingModule}
+                    disabled={savingModule}
+                  />
+                </View>
               </View>
             </View>
           </View>
-        </View>
-      </Modal>
-    </ScrollView>
+        </Modal>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screenWrapper: {
     flex: 1,
     backgroundColor: colors.background,
   },
+  container: {
+    flex: 1,
+  },
   scrollContent: {
     paddingHorizontal: 20,
-    paddingTop: 48,
-    paddingBottom: 90,
   },
   header: {
     flexDirection: 'row',
@@ -526,6 +546,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.mutedText,
     marginTop: 2,
+  },
+  avatarTouchable: {
+    minHeight: 48,
+    minWidth: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   heroCard: {
     backgroundColor: colors.card,
@@ -567,10 +593,10 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   chip: {
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     borderRadius: 20,
-    minHeight: 36,
+    minHeight: 48,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -580,7 +606,7 @@ const styles = StyleSheet.create({
   chipOutline: {
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: '#D0DDD0',
+    borderColor: colors.borderDark,
   },
   chipText: {
     fontSize: 13,
@@ -603,6 +629,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.text,
   },
+  seeAllTouchable: {
+    minHeight: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   seeAllText: {
     fontSize: 14,
     fontWeight: '600',
@@ -613,9 +644,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     backgroundColor: colors.lightGreen,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 14,
+    minHeight: 48,
   },
   addButtonText: {
     fontSize: 13,
@@ -657,11 +689,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.card,
     borderWidth: 1,
-    borderColor: '#E0E8DF',
+    borderColor: colors.border,
     borderRadius: 20,
     paddingVertical: 8,
     paddingLeft: 14,
     paddingRight: 10,
+    minHeight: 48,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.03,
@@ -671,6 +704,7 @@ const styles = StyleSheet.create({
   savedModuleContent: {
     flexDirection: 'row',
     alignItems: 'center',
+    height: '100%',
   },
   savedModuleCode: {
     fontSize: 13,
@@ -688,7 +722,11 @@ const styles = StyleSheet.create({
   },
   removeIconBtn: {
     marginLeft: 8,
-    padding: 2,
+    padding: 6,
+    minWidth: 32,
+    minHeight: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   centerContainer: {
     paddingVertical: 32,
@@ -727,6 +765,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: 14,
     padding: 14,
+    minHeight: 64,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
@@ -775,6 +814,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderRadius: 14,
     padding: 18,
+    minHeight: 56,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
@@ -791,7 +831,7 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: colors.overlay,
     justifyContent: 'center',
     paddingHorizontal: 24,
   },
