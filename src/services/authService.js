@@ -7,16 +7,17 @@ import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 
 // CREATE: register a new user and save the profile
-export const registerUser = async (name, email, password, role) => {
+export const registerUser = async (name, email, password, role, faculty = '') => {
     const cred = await createUserWithEmailAndPassword(auth, email, password);
     await setDoc(doc(db, 'users', cred.user.uid), {
         name,
         email,
         role,
+        faculty,
         status: 'active',
         createdAt: serverTimestamp(),
     });
-    return { uid: cred.user.uid, name, email, role };
+    return { uid: cred.user.uid, name, email, role, faculty };
 };
 
 // READ: get the profile (role) of a user
