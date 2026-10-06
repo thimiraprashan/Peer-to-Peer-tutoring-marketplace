@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -15,14 +17,20 @@ import { colors } from '../../theme/colors';
 import { Avatar } from '../../components/ui/Avatar';
 import { VerifiedBadge } from '../../components/ui/VerifiedBadge';
 import { AppButton } from '../../components/ui/AppButton';
+import { AppInput } from '../../components/ui/AppInput';
 import { useCurrentUser } from '../../hooks/useCurrentUser';
 import { getFeaturedTutors } from '../../services/tutorService';
+import {
+  addSavedModule,
+  getSavedModules,
+  removeSavedModule,
+} from '../../services/savedModuleService';
 
 const FILTER_SUBJECTS = ['IT', 'Business', 'Engineering'];
 
 export default function StudentHome() {
   const router = useRouter();
-  const { profile } = useCurrentUser();
+  const { user, profile } = useCurrentUser();
 
   // Search & filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -30,35 +38,70 @@ export default function StudentHome() {
 
   // Tutors list state
   const [tutors, setTutors] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingTutors, setLoadingTutors] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [tutorError, setTutorError] = useState<string | null>(null);
 
-  // Load tutors from service
+  // Saved modules state
+  const [savedModules, setSavedModules] = useState<any[]>([]);
+  const [loadingModules, setLoadingModules] = useState(true);
+  const [moduleError, setModuleError] = useState<string | null>(null);
+
+  // Add Module Modal state
+  const [modalVisible, setModalVisible] = useState(false);
+  const [newCode, setNewCode] = useState('');
+  const [newName, setNewName] = useState('');
+  const [savingModule, setSavingModule] = useState(false);
+  const [formError, setFormError] = useState<{ code?: string; name?: string; general?: string }>({});
+
+  // 1. Load tutors from service
   const loadTutors = useCallback(async (subject: string | null) => {
-    setError(null);
+    setTutorError(null);
     try {
       const data = await getFeaturedTutors(subject);
       setTutors(data);
     } catch (err: any) {
       console.error('Error loading tutors:', err);
-      setError('Unable to load tutors. Please check your connection.');
+      setTutorError('Unable to load tutors. Please check your connection.');
     } finally {
-      setLoading(false);
+      setLoadingTutors(false);
       setRefreshing(false);
     }
   }, []);
 
-  // Fetch when filter chip changes
+  // 2. Load saved modules for current user
+  const loadSavedModules = useCallback(async () => {
+    if (!user?.uid) return;
+    setModuleError(null);
+    try {
+      const data = await getSavedModules(user.uid);
+      setSavedModules(data);
+    } catch (err: any) {
+      console.error('Error loading saved modules:', err);
+      setModuleError('Could not load modules.');
+    } finally {
+      setLoadingModules(false);
+    }
+  }, [user?.uid]);
+
+  // Initial and reactive loads
   useEffect(() => {
-    setLoading(true);
+    setLoadingTutors(true);
     loadTutors(selectedSubject);
   }, [selectedSubject, loadTutors]);
 
+  useEffect(() => {
+    if (user?.uid) {
+      setLoadingModules(true);
+      loadSavedModules();
+    }
+  }, [user?.uid, loadSavedModules]);
+
   // Pull to refresh handler
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setRefreshing(true);
-    loadTutors(selectedSubject);
+    await Promise.all([loadTutors(selectedSubject), loadSavedModules()]);
+    setRefreshing(false);
   };
 
   // Toggle filter chip
@@ -77,6 +120,65 @@ export default function StudentHome() {
     } else {
       router.push('/(student)/search' as any);
     }
+  };
+
+  // Save Module Modal submit handler
+  const handleSaveModule = async () => {
+    const upperCode = newCode.trim().toUpperCase();
+    const trimmedName = newName.trim();
+    const errors: { code?: string; name?: string; general?: string } = {};
+
+    if (!upperCode) {
+      errors.code = 'Module code is required';
+    } else if (upperCode.length < 5 || upperCode.length > 8) {
+      errors.code = 'Must be between 5 and 8 characters (e.g., IT3010)';
+    }
+
+    if (!trimmedName) {
+      errors.name = 'Module name is required';
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFormError(errors);
+      return;
+    }
+
+    setSavingModule(true);
+    setFormError({});
+    try {
+      await addSavedModule(user?.uid, upperCode, trimmedName);
+      setModalVisible(false);
+      setNewCode('');
+      setNewName('');
+      loadSavedModules();
+    } catch (err: any) {
+      setFormError({ general: err.message || 'Failed to save module.' });
+    } finally {
+      setSavingModule(false);
+    }
+  };
+
+  // Remove saved module handler with confirmation alert
+  const handleConfirmRemove = (mod: any) => {
+    Alert.alert(
+      'Remove Module',
+      `Remove ${mod.moduleCode}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await removeSavedModule(mod.id);
+              loadSavedModules();
+            } catch (err: any) {
+              Alert.alert('Error', 'Could not remove module.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   // Extract first name for greeting
@@ -164,8 +266,79 @@ export default function StudentHome() {
         </View>
       </View>
 
-      {/* 5. Tutors Section */}
+      {/* NEW: My Modules Section */}
       <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>My Modules</Text>
+        <Pressable
+          onPress={() => {
+            setFormError({});
+            setModalVisible(true);
+          }}
+          accessibilityRole="button"
+          accessibilityLabel="Add module"
+          style={styles.addButton}
+        >
+          <Ionicons name="add" size={16} color={colors.primary} />
+          <Text style={styles.addButtonText}>Add</Text>
+        </Pressable>
+      </View>
+
+      {/* Saved Modules Horizontal List / Loading / Empty */}
+      {loadingModules ? (
+        <View style={styles.modulesLoading}>
+          <ActivityIndicator size="small" color={colors.primary} />
+        </View>
+      ) : moduleError ? (
+        <Text style={styles.moduleErrorText}>{moduleError}</Text>
+      ) : savedModules.length === 0 ? (
+        <View style={styles.emptyModulesCard}>
+          <Ionicons name="bookmark-outline" size={24} color={colors.mutedText} />
+          <Text style={styles.emptyModulesText}>
+            No saved modules yet. Tap + Add to save the ones you study.
+          </Text>
+        </View>
+      ) : (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.savedModulesRow}
+        >
+          {savedModules.map((mod) => (
+            <View key={mod.id} style={styles.savedModuleChip}>
+              <Pressable
+                onPress={() =>
+                  router.push({
+                    pathname: '/(student)/search',
+                    params: { q: mod.moduleCode },
+                  } as any)
+                }
+                accessibilityRole="button"
+                accessibilityLabel={`Search ${mod.moduleCode}`}
+                style={styles.savedModuleContent}
+              >
+                <Text style={styles.savedModuleCode}>{mod.moduleCode}</Text>
+                <Text style={styles.savedModuleDot}>·</Text>
+                <Text style={styles.savedModuleName} numberOfLines={1}>
+                  {mod.moduleName}
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => handleConfirmRemove(mod)}
+                accessibilityRole="button"
+                accessibilityLabel={`Remove ${mod.moduleCode}`}
+                style={styles.removeIconBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="close" size={16} color={colors.mutedText} />
+              </Pressable>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+
+      {/* 5. Tutors Section */}
+      <View style={[styles.sectionHeader, { marginTop: 12 }]}>
         <Text style={styles.sectionTitle}>Tutors</Text>
         <Pressable
           onPress={() => router.push('/(student)/search' as any)}
@@ -177,14 +350,14 @@ export default function StudentHome() {
       </View>
 
       {/* Tutors loading / error / empty / list */}
-      {loading ? (
+      {loadingTutors ? (
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
         </View>
-      ) : error ? (
+      ) : tutorError ? (
         <View style={styles.stateCard}>
           <Ionicons name="alert-circle-outline" size={36} color={colors.error} />
-          <Text style={styles.errorText}>{error}</Text>
+          <Text style={styles.errorText}>{tutorError}</Text>
           <View style={styles.retryButtonWrapper}>
             <AppButton
               title="Try again"
@@ -258,6 +431,72 @@ export default function StudentHome() {
           No upcoming bookings yet
         </Text>
       </View>
+
+      {/* Add Module Modal */}
+      <Modal
+        visible={modalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Add My Module</Text>
+
+            {formError.general ? (
+              <Text style={styles.generalErrorText}>{formError.general}</Text>
+            ) : null}
+
+            <AppInput
+              label="Module Code"
+              value={newCode}
+              onChangeText={(txt) => {
+                setNewCode(txt.toUpperCase());
+                if (formError.code) setFormError((e) => ({ ...e, code: undefined }));
+              }}
+              placeholder="e.g. IT3010"
+              icon="book-outline"
+              error={formError.code}
+            />
+
+            <AppInput
+              label="Module Name"
+              value={newName}
+              onChangeText={(txt) => {
+                setNewName(txt);
+                if (formError.name) setFormError((e) => ({ ...e, name: undefined }));
+              }}
+              placeholder="e.g. Data Structures"
+              icon="document-text-outline"
+              error={formError.name}
+            />
+
+            <View style={styles.modalActions}>
+              <View style={styles.modalButtonFlex}>
+                <AppButton
+                  title="Cancel"
+                  onPress={() => {
+                    setModalVisible(false);
+                    setNewCode('');
+                    setNewName('');
+                    setFormError({});
+                  }}
+                  variant="outline"
+                  disabled={savingModule}
+                />
+              </View>
+              <View style={styles.modalButtonFlex}>
+                <AppButton
+                  title="Save"
+                  onPress={handleSaveModule}
+                  loading={savingModule}
+                  disabled={savingModule}
+                />
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -270,7 +509,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 48,
-    paddingBottom: 90, // Prevents content from hiding behind the tab bar
+    paddingBottom: 90,
   },
   header: {
     flexDirection: 'row',
@@ -297,7 +536,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 6,
     elevation: 2,
-    marginBottom: 24,
+    marginBottom: 20,
   },
   heroHeading: {
     fontSize: 18,
@@ -357,7 +596,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   sectionTitle: {
     fontSize: 18,
@@ -368,6 +607,88 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: colors.primary,
+  },
+  addButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.lightGreen,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
+  addButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.primary,
+  },
+  modulesLoading: {
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  moduleErrorText: {
+    fontSize: 13,
+    color: colors.error,
+    marginBottom: 10,
+  },
+  emptyModulesCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: colors.card,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 14,
+  },
+  emptyModulesText: {
+    flex: 1,
+    fontSize: 13,
+    color: colors.mutedText,
+    lineHeight: 18,
+  },
+  savedModulesRow: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingVertical: 4,
+    marginBottom: 14,
+  },
+  savedModuleChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: '#E0E8DF',
+    borderRadius: 20,
+    paddingVertical: 8,
+    paddingLeft: 14,
+    paddingRight: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  savedModuleContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  savedModuleCode: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  savedModuleDot: {
+    marginHorizontal: 4,
+    color: colors.mutedText,
+  },
+  savedModuleName: {
+    fontSize: 13,
+    color: colors.text,
+    maxWidth: 120,
+  },
+  removeIconBtn: {
+    marginLeft: 8,
+    padding: 2,
   },
   centerContainer: {
     paddingVertical: 32,
@@ -467,5 +788,42 @@ const styles = StyleSheet.create({
   bookingPlaceholderText: {
     fontSize: 14,
     color: colors.mutedText,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  modalContent: {
+    backgroundColor: colors.card,
+    borderRadius: 18,
+    padding: 22,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  generalErrorText: {
+    fontSize: 13,
+    color: colors.error,
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  modalButtonFlex: {
+    flex: 1,
   },
 });
