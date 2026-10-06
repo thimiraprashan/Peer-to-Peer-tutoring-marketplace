@@ -97,7 +97,8 @@ export default function Login() {
         return;
       }
 
-      router.replace(`/${profile.role}` as any); // /student, /tutor or /admin
+      const destination = profile.role === 'student' ? '/(student)' : `/${profile.role}`;
+      router.replace(destination as any);
     } catch (e: any) {
       Alert.alert('Login failed', getFriendlyErrorMessage(e));
     } finally {

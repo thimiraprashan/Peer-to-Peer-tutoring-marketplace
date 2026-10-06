@@ -144,7 +144,8 @@ export default function Register() {
         return;
       }
 
-      router.replace(`/${profile.role}` as any); // /student or /tutor
+      const destination = profile.role === 'student' ? '/(student)' : `/${profile.role}`;
+      router.replace(destination as any);
     } catch (e: any) {
       Alert.alert('Registration failed', getFriendlyErrorMessage(e));
     } finally {
