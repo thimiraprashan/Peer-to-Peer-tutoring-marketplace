@@ -10,11 +10,11 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
-import { useAuth } from "../../contexts/AuthContext";
+import { useAuth } from "../../../contexts/AuthContext";
 import {
     addAvailabilitySlot,
     getMyAvailability,
-} from "../../services/tutorService";
+} from "../../../services/tutorService";
 
 // ---------- TYPES ----------
 interface SavedSlot {

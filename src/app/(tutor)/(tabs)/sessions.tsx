@@ -11,11 +11,11 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
-import { useAuth } from "../../contexts/AuthContext";
+import { useAuth } from "../../../contexts/AuthContext";
 import {
     getTutorBookings,
     markSessionCompleted,
-} from "../../services/bookingService";
+} from "../../../services/bookingService";
 
 const COLORS: Record<string, string> = {
   background: "#EAF2E5",
