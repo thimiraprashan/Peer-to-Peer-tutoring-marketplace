@@ -57,7 +57,7 @@ export default function TutorDashboard() {
   // ---------- Load all data on focus ----------
   const loadData = async () => {
     try {
-      const uid = user?.uid || user?.id || user?._id;
+      const uid = user?.uid;
       if (!uid) return;
 
       const [bookingsData, profileData, verificationData] = await Promise.all([
