@@ -1,19 +1,21 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useFocusEffect } from "expo-router";
+import { useCallback, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { useAuth } from "../../../contexts/AuthContext";
+import { auth } from "../../../firebase";
 import {
-    addAvailabilitySlot,
-    getMyAvailability,
+  addAvailabilitySlot,
+  deleteAvailabilitySlot,
+  getMyAvailability,
+  updateAvailabilitySlot,
 } from "../../../services/tutorService";
 
 // ---------- TYPES ----------
@@ -30,17 +32,9 @@ interface WeeklySlots {
   [key: string]: string[];
 }
 
-interface AvailabilitySlotPayload {
-  tutorId?: string;
-  date: string;
-  startTime: string;
-  endTime: string;
-  mode: SessionMode;
-  isBooked: boolean;
-}
-
 type DayName = "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat";
-type SessionMode = "Online" | "Face-to-face";
+// ⚠️ Schema-compliant modes (lowercase)
+type SessionMode = "online" | "face" | "both";
 type SessionDuration = "30 min" | "1 hour" | "2 hours";
 
 const DAYS: DayName[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -54,7 +48,13 @@ const TIMES: string[] = [
   "03:00 PM",
   "04:00 PM",
 ];
-const MODE_OPTIONS: SessionMode[] = ["Online", "Face-to-face"];
+
+const MODE_OPTIONS: { value: SessionMode; label: string }[] = [
+  { value: "online", label: "Online" },
+  { value: "face", label: "Face-to-face" },
+  { value: "both", label: "Both" },
+];
+
 const DURATION_OPTIONS: SessionDuration[] = ["30 min", "1 hour", "2 hours"];
 
 const COLORS: Record<string, string> = {
@@ -65,133 +65,246 @@ const COLORS: Record<string, string> = {
   textGray: "#7A8A7A",
   border: "#DDE8D8",
   white: "#FFFFFF",
+  danger: "#E74C3C",
+  dangerLight: "#FFE8E8",
 };
 
 const createEmptyWeeklySlots = (): WeeklySlots => {
   const empty: WeeklySlots = {};
-  DAYS.forEach((day: DayName) => {
+  DAYS.forEach((day) => {
     empty[day] = [];
   });
   return empty;
 };
 
-export default function TutorAvailability() {
-  const router = useRouter();
-  const { user } = useAuth();
+// Helper: display mode in user-friendly way
+const formatMode = (mode?: string) => {
+  if (mode === "online") return "Online";
+  if (mode === "face") return "Face-to-face";
+  if (mode === "both") return "Both";
+  return mode || "";
+};
 
-  const [weeklySlots, setWeeklySlots] = useState<WeeklySlots>(createEmptyWeeklySlots());
-  const [loading, setLoading] = useState<boolean>(true);
-  const [saving, setSaving] = useState<boolean>(false);
-  const [selectedMode, setSelectedMode] = useState<SessionMode>("Online");
-  const [selectedDuration, setSelectedDuration] = useState<SessionDuration>("1 hour");
+export default function TutorAvailability() {
+  // 🔑 Firebase Auth = source of truth
+  const uid = auth?.currentUser?.uid;
+
+  const [weeklySlots, setWeeklySlots] = useState<WeeklySlots>(
+    createEmptyWeeklySlots(),
+  );
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [selectedMode, setSelectedMode] = useState<SessionMode>("online");
+  const [selectedDuration, setSelectedDuration] =
+    useState<SessionDuration>("1 hour");
   const [savedSlots, setSavedSlots] = useState<SavedSlot[]>([]);
 
-  useEffect(() => {
-    loadAvailability();
-  }, []);
-
-  // ---------- LOAD existing slots from Firestore ----------
-  const loadAvailability = async (): Promise<void> => {
+  // ---------- LOAD existing slots ----------
+  const loadAvailability = async () => {
+    if (!uid) {
+      setLoading(false);
+      return;
+    }
     try {
-      const uid: string | undefined = user?.uid || user?.id || user?._id;
-      const slots: SavedSlot[] = await getMyAvailability(uid);
-      setSavedSlots(slots);
+      const slots = await getMyAvailability(uid);
+      // Sort by date + start time
+      const sorted = (slots as SavedSlot[]).sort((a, b) => {
+        const ka = `${a.date || ""}${a.startTime || ""}`;
+        const kb = `${b.date || ""}${b.startTime || ""}`;
+        return ka.localeCompare(kb);
+      });
+      setSavedSlots(sorted);
 
-      // Empty weekly grid (this grid is for creating new slots)
-      const empty: WeeklySlots = {};
-      DAYS.forEach((d: DayName) => (empty[d] = []));
-      setWeeklySlots(empty);
-    } catch (error: unknown) {
-      console.log(
-        "Availability load error:",
-        error instanceof Error ? error.message : String(error),
-      );
+      // Reset weekly grid
+      setWeeklySlots(createEmptyWeeklySlots());
+    } catch (error: any) {
+      console.log("Availability load error:", error?.message || error);
     } finally {
       setLoading(false);
     }
   };
 
-  // ---------- TOGGLE a slot in the weekly grid ----------
-  const toggleSlot = (day: DayName, time: string): void => {
-    setWeeklySlots((prev: WeeklySlots): WeeklySlots => {
-      const daySlots: string[] = prev[day] || [];
-      const has: boolean = daySlots.includes(time);
-      const updated: string[] = has
-        ? daySlots.filter((t: string) => t !== time)
+  // Reload on tab focus
+  useFocusEffect(
+    useCallback(() => {
+      loadAvailability();
+    }, [uid]),
+  );
+
+  // ---------- TOGGLE slot in weekly grid ----------
+  const toggleSlot = (day: DayName, time: string) => {
+    setWeeklySlots((prev) => {
+      const daySlots = prev[day] || [];
+      const has = daySlots.includes(time);
+      const updated = has
+        ? daySlots.filter((t) => t !== time)
         : [...daySlots, time];
       return { ...prev, [day]: updated };
     });
   };
 
-  // ---------- SAVE all selected slots to Firestore ----------
-  const saveAvailability = async (): Promise<void> => {
-    setSaving(true);
+  // ---------- SAVE all selected slots (CREATE) ----------
+  const saveAvailability = async () => {
+    if (!uid) {
+      Alert.alert("Error", "You must be logged in.");
+      return;
+    }
+
+    // Count total selected
+    const totalSelected = DAYS.reduce(
+      (sum, d) => sum + (weeklySlots[d]?.length || 0),
+      0,
+    );
+
+    if (totalSelected === 0) {
+      Alert.alert("Nothing to save", "Please select at least one slot.");
+      return;
+    }
+
+    Alert.alert(
+      "Save Availability",
+      `Save ${totalSelected} slot${totalSelected !== 1 ? "s" : ""}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Save",
+          onPress: async () => {
+            setSaving(true);
+            try {
+              let slotsAdded = 0;
+
+              for (const day of DAYS) {
+                const times = weeklySlots[day] || [];
+
+                // Compute real date for this weekday
+                const today = new Date();
+                const dayIndex = [
+                  "Sun",
+                  "Mon",
+                  "Tue",
+                  "Wed",
+                  "Thu",
+                  "Fri",
+                  "Sat",
+                ].indexOf(day);
+                const diff = dayIndex - today.getDay();
+                const targetDate = new Date(today);
+                targetDate.setDate(today.getDate() + diff);
+                const dateString = targetDate.toISOString().split("T")[0]; // YYYY-MM-DD
+
+                for (const time of times) {
+                  // Convert 12-hour to 24-hour
+                  const [hhmm, period] = time.split(" ");
+                  let [h, m] = hhmm.split(":").map(Number);
+                  if (period === "PM" && h !== 12) h += 12;
+                  if (period === "AM" && h === 12) h = 0;
+
+                  let addHours = 1;
+                  if (selectedDuration === "30 min") addHours = 0.5;
+                  if (selectedDuration === "2 hours") addHours = 2;
+
+                  const endTotalMin = h * 60 + m + addHours * 60;
+                  const endH = Math.floor(endTotalMin / 60);
+                  const endM = endTotalMin % 60;
+
+                  const startTime = `${String(h).padStart(2, "0")}:${String(
+                    m,
+                  ).padStart(2, "0")}`;
+                  const endTime = `${String(endH).padStart(2, "0")}:${String(
+                    endM,
+                  ).padStart(2, "0")}`;
+
+                  await addAvailabilitySlot({
+                    tutorId: uid,
+                    date: dateString,
+                    startTime,
+                    endTime,
+                    mode: selectedMode,
+                    isBooked: false,
+                  });
+                  slotsAdded++;
+                }
+              }
+
+              Alert.alert(
+                "Success",
+                `${slotsAdded} slot${slotsAdded !== 1 ? "s" : ""} saved!`,
+              );
+              loadAvailability();
+            } catch (error: any) {
+              console.log("Save error:", error?.message || error);
+              Alert.alert("Error", "Failed to save availability.");
+            } finally {
+              setSaving(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  // ---------- DELETE slot (D) ----------
+  const handleDeleteSlot = (slotId: string, isBooked?: boolean) => {
+    if (isBooked) {
+      Alert.alert(
+        "Cannot Delete",
+        "This slot is already booked. Cancel the booking first.",
+      );
+      return;
+    }
+
+    Alert.alert("Delete Slot", "Are you sure you want to delete this slot?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await deleteAvailabilitySlot(slotId);
+            loadAvailability();
+          } catch (error: any) {
+            Alert.alert("Error", error?.message || "Could not delete.");
+          }
+        },
+      },
+    ]);
+  };
+
+  // ---------- EDIT slot mode (U) ----------
+  const handleEditSlot = (slot: SavedSlot) => {
+    if (slot.isBooked) {
+      Alert.alert("Cannot Edit", "This slot is already booked.");
+      return;
+    }
+
+    Alert.alert(
+      "Change Session Mode",
+      `Current: ${formatMode(slot.mode)}\n\nSelect new mode:`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Online",
+          onPress: () => updateSlotMode(slot.id, "online"),
+        },
+        {
+          text: "Face-to-face",
+          onPress: () => updateSlotMode(slot.id, "face"),
+        },
+        {
+          text: "Both",
+          onPress: () => updateSlotMode(slot.id, "both"),
+        },
+      ],
+    );
+  };
+
+  const updateSlotMode = async (slotId: string, newMode: SessionMode) => {
     try {
-      const uid = user?.uid || user?.id || user?._id;
-      let slotsAdded = 0;
-
-      // For each day that has selected times, create Firestore documents
-      for (const day of DAYS) {
-        const times = weeklySlots[day] || [];
-
-        // Calculate the real date (YYYY-MM-DD) for this weekday
-        const today = new Date();
-        const dayIndex = [
-          "Sun",
-          "Mon",
-          "Tue",
-          "Wed",
-          "Thu",
-          "Fri",
-          "Sat",
-        ].indexOf(day);
-        const diff = dayIndex - today.getDay();
-        const targetDate = new Date(today);
-        targetDate.setDate(today.getDate() + diff);
-        const dateString = targetDate.toISOString().split("T")[0];
-
-        for (const time of times) {
-          // Compute endTime based on duration (simple approximation)
-          const [hhmm, period] = time.split(" ");
-          let [h, m] = hhmm.split(":").map(Number);
-          if (period === "PM" && h !== 12) h += 12;
-          if (period === "AM" && h === 12) h = 0;
-
-          let addHours = 1;
-          if (selectedDuration === "30 min") addHours = 0.5;
-          if (selectedDuration === "2 hours") addHours = 2;
-
-          const endH = Math.floor(h + addHours);
-          const endM = m;
-          const endTime = `${String(endH).padStart(2, "0")}:${String(endM).padStart(2, "0")}`;
-          const startTime = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-
-          await addAvailabilitySlot({
-            tutorId: uid,
-            date: dateString,
-            startTime,
-            endTime,
-            mode: selectedMode,
-            isBooked: false,
-          });
-          slotsAdded++;
-        }
-      }
-
-      if (slotsAdded === 0) {
-        Alert.alert("Nothing to save", "Please select at least one slot.");
-      } else {
-        Alert.alert(
-          "Success",
-          `${slotsAdded} availability slot${slotsAdded !== 1 ? "s" : ""} saved successfully!`,
-        );
-        loadAvailability();
-      }
-    } catch (error) {
-      console.log("Save error:", error instanceof Error ? error.message : String(error));
-      Alert.alert("Error", "Failed to save availability");
-    } finally {
-      setSaving(false);
+      await updateAvailabilitySlot(slotId, { mode: newMode });
+      Alert.alert("Updated", `Mode changed to "${formatMode(newMode)}"`);
+      loadAvailability();
+    } catch (error: any) {
+      Alert.alert("Error", error?.message || "Could not update.");
     }
   };
 
@@ -207,37 +320,102 @@ export default function TutorAvailability() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.textDark} />
-        </TouchableOpacity>
         <Text style={styles.headerTitle}>My Availability</Text>
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 120 }}
+      >
+        {/* ============ SAVED SLOTS (Read + Update + Delete) ============ */}
+        <Text style={styles.sectionTitle}>My Slots ({savedSlots.length})</Text>
+        {savedSlots.length === 0 ? (
+          <View style={styles.emptyBox}>
+            <Ionicons name="calendar-outline" size={36} color={COLORS.border} />
+            <Text style={styles.emptyText}>No slots yet. Add some below.</Text>
+          </View>
+        ) : (
+          savedSlots.map((slot) => (
+            <View key={slot.id} style={styles.savedSlotRow}>
+              <View
+                style={[
+                  styles.slotIcon,
+                  slot.isBooked && { backgroundColor: "#FFE8E8" },
+                ]}
+              >
+                <Ionicons
+                  name="calendar-outline"
+                  size={18}
+                  color={slot.isBooked ? COLORS.danger : COLORS.primary}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.savedSlotDate}>
+                  {slot.date} • {slot.startTime} - {slot.endTime}
+                </Text>
+                <Text style={styles.savedSlotMode}>
+                  {formatMode(slot.mode)}
+                  {slot.isBooked ? " • Booked" : ""}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.iconBtn}
+                onPress={() => handleEditSlot(slot)}
+                disabled={slot.isBooked}
+              >
+                <Ionicons
+                  name="create-outline"
+                  size={18}
+                  color={slot.isBooked ? COLORS.border : COLORS.primary}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.iconBtn, styles.deleteBtn]}
+                onPress={() => handleDeleteSlot(slot.id, slot.isBooked)}
+                disabled={slot.isBooked}
+              >
+                <Ionicons
+                  name="trash-outline"
+                  size={18}
+                  color={slot.isBooked ? COLORS.border : COLORS.danger}
+                />
+              </TouchableOpacity>
+            </View>
+          ))
+        )}
+
+        {/* ============ NEW SLOT CREATION ============ */}
+        <Text style={[styles.sectionTitle, { marginTop: 24 }]}>
+          Add New Slots
+        </Text>
+
         {/* Session Mode */}
-        <Text style={styles.sectionTitle}>Session Mode</Text>
+        <Text style={styles.label}>Session Mode</Text>
         <View style={styles.modeRow}>
-          {(["Online", "Face-to-face"] as const).map((m) => (
+          {MODE_OPTIONS.map((opt) => (
             <TouchableOpacity
-              key={m}
-              style={[styles.modeChip, selectedMode === m && styles.modeActive]}
-              onPress={() => setSelectedMode(m)}
+              key={opt.value}
+              style={[
+                styles.modeChip,
+                selectedMode === opt.value && styles.modeActive,
+              ]}
+              onPress={() => setSelectedMode(opt.value)}
             >
               <Text
                 style={[
                   styles.modeText,
-                  selectedMode === m && styles.modeTextActive,
+                  selectedMode === opt.value && styles.modeTextActive,
                 ]}
               >
-                {m}
+                {opt.label}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
 
         {/* Session Duration */}
-        <Text style={styles.sectionTitle}>Session Duration</Text>
+        <Text style={styles.label}>Session Duration</Text>
         <View style={styles.modeRow}>
           {DURATION_OPTIONS.map((dur) => (
             <TouchableOpacity
@@ -262,8 +440,7 @@ export default function TutorAvailability() {
 
         {/* Weekly Grid */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Weekly Availability</Text>
-          <Text style={styles.hint}>Tap to toggle</Text>
+          <Text style={styles.label}>Tap cells to select</Text>
         </View>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
@@ -297,12 +474,11 @@ export default function TutorAvailability() {
           </View>
         </ScrollView>
 
-        {/* Legend */}
         <View style={styles.legend}>
           <View
             style={[styles.legendBox, { backgroundColor: COLORS.primary }]}
           />
-          <Text style={styles.legendText}>Available</Text>
+          <Text style={styles.legendText}>Selected</Text>
           <View
             style={[
               styles.legendBox,
@@ -313,36 +489,8 @@ export default function TutorAvailability() {
               },
             ]}
           />
-          <Text style={styles.legendText}>Not available</Text>
+          <Text style={styles.legendText}>Not selected</Text>
         </View>
-
-        {/* Existing saved slots */}
-        <Text style={styles.sectionTitle}>
-          Saved Slots ({savedSlots.length})
-        </Text>
-        {savedSlots.length === 0 ? (
-          <Text style={styles.emptyText}>No saved slots yet</Text>
-        ) : (
-          savedSlots.map((slot) => (
-            <View key={slot.id} style={styles.savedSlotRow}>
-              <Ionicons
-                name="calendar-outline"
-                size={18}
-                color={COLORS.primary}
-              />
-              <Text style={styles.savedSlotText}>
-                {slot.date} • {slot.startTime} - {slot.endTime} • {slot.mode}
-              </Text>
-              {slot.isBooked && (
-                <View style={styles.bookedBadge}>
-                  <Text style={styles.bookedText}>Booked</Text>
-                </View>
-              )}
-            </View>
-          ))
-        )}
-
-        <View style={{ height: 120 }} />
       </ScrollView>
 
       {/* Save Button */}
@@ -355,7 +503,7 @@ export default function TutorAvailability() {
           {saving ? (
             <ActivityIndicator color="#fff" />
           ) : (
-            <Text style={styles.saveText}>Save Availability</Text>
+            <Text style={styles.saveText}>Save New Slots</Text>
           )}
         </TouchableOpacity>
       </View>
@@ -378,6 +526,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
+    backgroundColor: COLORS.background,
   },
   header: {
     flexDirection: "row",
@@ -386,32 +535,54 @@ const styles = StyleSheet.create({
     marginTop: 50,
     marginBottom: 16,
   },
-  headerTitle: { fontSize: 18, fontWeight: "700", color: COLORS.textDark },
-  sectionTitle: {
-    fontSize: 15,
+  headerTitle: {
+    fontSize: 18,
     fontWeight: "700",
     color: COLORS.textDark,
-    marginTop: 16,
-    marginBottom: 10,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: COLORS.textDark,
+    marginTop: 8,
+    marginBottom: 12,
   },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    marginTop: 12,
   },
-  hint: { fontSize: 11, color: COLORS.textGray, marginTop: 16 },
-  modeRow: { flexDirection: "row", gap: 10 },
+  label: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: COLORS.textGray,
+    marginTop: 16,
+    marginBottom: 8,
+  },
+
+  // Mode chips
+  modeRow: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
   modeChip: {
-    paddingHorizontal: 18,
+    paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: COLORS.border,
     backgroundColor: "#fff",
   },
-  modeActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  modeText: { color: COLORS.textDark, fontWeight: "600", fontSize: 13 },
+  modeActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  modeText: {
+    color: COLORS.textDark,
+    fontWeight: "600",
+    fontSize: 13,
+  },
   modeTextActive: { color: "#fff" },
+
+  // Weekly grid
   gridRow: { flexDirection: "row" },
   timeLabel: { width: 70, height: CELL_SIZE, justifyContent: "center" },
   timeLabelText: { fontSize: 11, color: COLORS.textGray },
@@ -437,11 +608,26 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  slotActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  legend: { flexDirection: "row", alignItems: "center", marginTop: 20, gap: 8 },
+  slotActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+
+  // Legend
+  legend: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 16,
+    gap: 8,
+  },
   legendBox: { width: 16, height: 16, borderRadius: 4 },
-  legendText: { fontSize: 12, color: COLORS.textGray, marginRight: 12 },
-  emptyText: { color: COLORS.textGray, fontSize: 13, marginTop: 6 },
+  legendText: {
+    fontSize: 12,
+    color: COLORS.textGray,
+    marginRight: 12,
+  },
+
+  // Saved slot rows
   savedSlotRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -453,14 +639,45 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
-  savedSlotText: { flex: 1, fontSize: 12, color: COLORS.textDark },
-  bookedBadge: {
-    backgroundColor: "#FFE8E8",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
+  slotIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.primaryLight,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  bookedText: { fontSize: 10, color: "#E74C3C", fontWeight: "700" },
+  savedSlotDate: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: COLORS.textDark,
+  },
+  savedSlotMode: {
+    fontSize: 11,
+    color: COLORS.textGray,
+    marginTop: 2,
+  },
+  iconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: COLORS.primaryLight,
+  },
+  deleteBtn: { backgroundColor: COLORS.dangerLight },
+
+  emptyBox: {
+    alignItems: "center",
+    paddingVertical: 24,
+  },
+  emptyText: {
+    color: COLORS.textGray,
+    fontSize: 13,
+    marginTop: 8,
+  },
+
+  // Bottom bar
   bottomBar: {
     position: "absolute",
     bottom: 0,
@@ -478,5 +695,9 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: "center",
   },
-  saveText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  saveText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 15,
+  },
 });
