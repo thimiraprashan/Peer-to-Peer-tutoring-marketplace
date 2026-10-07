@@ -1,20 +1,25 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { router, useFocusEffect, type Href } from "expo-router";
+import { signOut } from "firebase/auth";
+import { useCallback, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { useAuth } from "../../../contexts/AuthContext";
+import { auth } from "../../../firebase";
 import {
-    getTutorProfile,
-    updateTutorProfile,
+  addTutorSubject,
+  deleteTutorSubject,
+  getTutorProfile,
+  getTutorSubjects,
+  updateTutorProfile,
 } from "../../../services/tutorService";
 
 const COLORS = {
@@ -36,13 +41,25 @@ type TutorProfileData = {
   bio?: string;
   hourlyRate?: number;
   sessionMode?: string;
+  university?: string;
+  faculty?: string;
+};
+
+type Subject = {
+  id: string;
+  tutorId: string;
+  moduleCode: string;
+  moduleName: string;
+  subjectArea: string;
 };
 
 export default function TutorProfile() {
-  const router = useRouter();
   const { user } = useAuth();
 
+  const uid = auth?.currentUser?.uid;
+
   const [profile, setProfile] = useState<TutorProfileData | null>(null);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [bio, setBio] = useState("");
@@ -50,21 +67,29 @@ export default function TutorProfile() {
   const [sessionMode, setSessionMode] = useState("online");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => {
-    loadProfile();
-  }, []);
+  const [showAddSubject, setShowAddSubject] = useState(false);
+  const [newModuleCode, setNewModuleCode] = useState("");
+  const [newModuleName, setNewModuleName] = useState("");
 
-  // ---------- Load profile from Firestore ----------
-  const loadProfile = async () => {
+  const loadData = async () => {
+    if (!uid) {
+      setLoading(false);
+      return;
+    }
     try {
-      const uid = user?.uid || user?.id || user?._id;
-      const data = (await getTutorProfile(uid)) as TutorProfileData | null;
-      if (data) {
-        setProfile(data);
-        setBio(data.bio || "");
-        setPrice(String(data.hourlyRate ?? ""));
-        setSessionMode(data.sessionMode || "online");
+      const [profileData, subjectsData] = await Promise.all([
+        getTutorProfile(uid),
+        getTutorSubjects(uid),
+      ]);
+
+      const p = profileData as TutorProfileData | null;
+      if (p) {
+        setProfile(p);
+        setBio(p.bio || "");
+        setPrice(String(p.hourlyRate ?? ""));
+        setSessionMode(p.sessionMode || "online");
       }
+      setSubjects((subjectsData as Subject[]) || []);
     } catch (error) {
       console.log(
         "Profile load error:",
@@ -75,19 +100,27 @@ export default function TutorProfile() {
     }
   };
 
-  // ---------- Save changes to Firestore ----------
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [uid]),
+  );
+
   const handleSave = async () => {
+    if (!uid) {
+      Alert.alert("Error", "You must be logged in.");
+      return;
+    }
     setSaving(true);
     try {
-      const uid = user?.uid || user?.id || user?._id;
       await updateTutorProfile(uid, {
-        bio,
+        bio: bio.trim(),
         hourlyRate: Number(price) || 1500,
         sessionMode,
       });
       Alert.alert("Success", "Profile updated!");
       setEditing(false);
-      loadProfile();
+      loadData();
     } catch (error) {
       Alert.alert(
         "Error",
@@ -96,6 +129,76 @@ export default function TutorProfile() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleAddSubject = async () => {
+    if (!uid) return;
+    if (!newModuleCode.trim() || !newModuleName.trim()) {
+      Alert.alert("Error", "Please enter module code and name.");
+      return;
+    }
+
+    try {
+      await addTutorSubject(uid, {
+        moduleCode: newModuleCode.trim().toUpperCase(),
+        moduleName: newModuleName.trim(),
+        subjectArea: newModuleName.trim(),
+      });
+      setNewModuleCode("");
+      setNewModuleName("");
+      setShowAddSubject(false);
+      Alert.alert("Success", "Subject added!");
+      loadData();
+    } catch (error) {
+      Alert.alert(
+        "Error",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  };
+
+  const handleDeleteSubject = (subjectId: string) => {
+    Alert.alert("Delete Subject", "Are you sure?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await deleteTutorSubject(subjectId);
+            loadData();
+          } catch (error) {
+            Alert.alert(
+              "Error",
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        },
+      },
+    ]);
+  };
+
+  // ---------- Logout ----------
+  const handleLogout = () => {
+    Alert.alert("Logout", "Are you sure you want to log out?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Logout",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await signOut(auth);
+            // 👇 Redirect to login page
+router.replace("/login" as Href);   
+       } catch (error) {
+            Alert.alert(
+              "Error",
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+        },
+      },
+    ]);
   };
 
   if (loading) {
@@ -110,7 +213,7 @@ export default function TutorProfile() {
     <ScrollView style={styles.container}>
       <Text style={styles.title}>Profile</Text>
 
-      {/* User info */}
+      {/* ---------- User info ---------- */}
       <View style={styles.userBox}>
         <View style={styles.avatar}>
           <Text style={styles.avatarText}>
@@ -119,6 +222,7 @@ export default function TutorProfile() {
         </View>
         <Text style={styles.name}>{user?.name || "Tutor"}</Text>
         <Text style={styles.email}>{user?.email}</Text>
+
         {profile?.verified ? (
           <View style={styles.verifiedBadge}>
             <Ionicons
@@ -129,16 +233,42 @@ export default function TutorProfile() {
             <Text style={styles.verifiedText}>Verified</Text>
           </View>
         ) : (
-          <View style={[styles.verifiedBadge, { backgroundColor: "#FFF4E6" }]}>
+          <TouchableOpacity
+            style={[styles.verifiedBadge, { backgroundColor: "#FFF4E6" }]}
+            onPress={() =>
+              router.push("/(tutor)/tutor-verification-status" as Href)
+            }
+          >
             <Ionicons name="time" size={14} color="#F5A623" />
             <Text style={[styles.verifiedText, { color: "#F5A623" }]}>
               Pending Verification
             </Text>
-          </View>
+          </TouchableOpacity>
         )}
       </View>
 
-      {/* Editable fields */}
+      {/* ---------- Verification call-to-action ---------- */}
+      {!profile?.verified ? (
+        <TouchableOpacity
+          style={styles.verificationBanner}
+          onPress={() => router.push("/(tutor)/tutor-profile-form" as Href)}
+        >
+          <Ionicons
+            name="shield-checkmark-outline"
+            size={22}
+            color={COLORS.primary}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.bannerTitle}>Complete Your Profile</Text>
+            <Text style={styles.bannerDesc}>
+              Submit verification to start tutoring
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={COLORS.primary} />
+        </TouchableOpacity>
+      ) : null}
+
+      {/* ---------- Editable fields ---------- */}
       <View style={styles.card}>
         <View style={styles.fieldRow}>
           <Text style={styles.label}>Hourly Rate (Rs.)</Text>
@@ -202,7 +332,7 @@ export default function TutorProfile() {
         </View>
       </View>
 
-      {/* Edit/Save button */}
+      {/* ---------- Edit/Save button ---------- */}
       <TouchableOpacity
         style={[styles.editBtn, editing && styles.saveBtn]}
         onPress={editing ? handleSave : () => setEditing(true)}
@@ -217,11 +347,68 @@ export default function TutorProfile() {
         )}
       </TouchableOpacity>
 
-      {/* Logout */}
-      <TouchableOpacity
-        style={styles.logoutBtn}
-        onPress={() => router.replace("/login")}
-      >
+      {/* ---------- Subjects Section ---------- */}
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Subjects I Teach</Text>
+        <TouchableOpacity onPress={() => setShowAddSubject(!showAddSubject)}>
+          <Ionicons
+            name={showAddSubject ? "close-circle" : "add-circle"}
+            size={26}
+            color={COLORS.primary}
+          />
+        </TouchableOpacity>
+      </View>
+
+      {showAddSubject ? (
+        <View style={styles.addSubjectCard}>
+          <TextInput
+            style={styles.input}
+            placeholder="Module code (e.g. IT3060)"
+            placeholderTextColor={COLORS.textGray}
+            value={newModuleCode}
+            onChangeText={setNewModuleCode}
+            autoCapitalize="characters"
+          />
+          <TextInput
+            style={[styles.input, { marginTop: 8 }]}
+            placeholder="Module name (e.g. HCI)"
+            placeholderTextColor={COLORS.textGray}
+            value={newModuleName}
+            onChangeText={setNewModuleName}
+          />
+          <TouchableOpacity
+            style={styles.addSubjectBtn}
+            onPress={handleAddSubject}
+          >
+            <Text style={styles.addSubjectText}>Add Subject</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {subjects.length === 0 ? (
+        <View style={styles.emptyBox}>
+          <Ionicons name="school-outline" size={40} color={COLORS.border} />
+          <Text style={styles.emptyText}>No subjects added yet</Text>
+        </View>
+      ) : (
+        subjects.map((s) => (
+          <View key={s.id} style={styles.subjectCard}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.subjectCode}>{s.moduleCode}</Text>
+              <Text style={styles.subjectName}>{s.moduleName}</Text>
+            </View>
+            <TouchableOpacity
+              onPress={() => handleDeleteSubject(s.id)}
+              style={styles.deleteIcon}
+            >
+              <Ionicons name="trash-outline" size={20} color={COLORS.danger} />
+            </TouchableOpacity>
+          </View>
+        ))
+      )}
+
+      {/* ---------- Logout ---------- */}
+      <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
         <Ionicons name="log-out-outline" size={20} color={COLORS.danger} />
         <Text style={styles.logoutText}>Logout</Text>
       </TouchableOpacity>
@@ -231,16 +418,18 @@ export default function TutorProfile() {
   );
 }
 
-// ============================================================
-// STYLES
-// ============================================================
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.background,
     paddingHorizontal: 20,
   },
-  centerContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  centerContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: COLORS.background,
+  },
   title: {
     fontSize: 22,
     fontWeight: "700",
@@ -271,7 +460,34 @@ const styles = StyleSheet.create({
     marginTop: 10,
     gap: 4,
   },
-  verifiedText: { fontSize: 11, fontWeight: "700", color: COLORS.primary },
+  verifiedText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: COLORS.primary,
+  },
+
+  verificationBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    padding: 14,
+    borderRadius: 12,
+    gap: 12,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  bannerTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: COLORS.textDark,
+  },
+  bannerDesc: {
+    fontSize: 11,
+    color: COLORS.textGray,
+    marginTop: 2,
+  },
+
   card: {
     backgroundColor: COLORS.backgroundAlt,
     borderRadius: 14,
@@ -285,7 +501,11 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     fontWeight: "600",
   },
-  value: { fontSize: 14, color: COLORS.textDark, fontWeight: "500" },
+  value: {
+    fontSize: 14,
+    color: COLORS.textDark,
+    fontWeight: "500",
+  },
   input: {
     backgroundColor: "#fff",
     borderRadius: 10,
@@ -296,6 +516,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.border,
   },
+
   modeRow: { flexDirection: "row", gap: 8 },
   modeChip: {
     paddingHorizontal: 14,
@@ -309,25 +530,102 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary,
     borderColor: COLORS.primary,
   },
-  modeText: { fontSize: 12, color: COLORS.textDark, fontWeight: "600" },
+  modeText: {
+    fontSize: 12,
+    color: COLORS.textDark,
+    fontWeight: "600",
+  },
   modeTextActive: { color: "#fff" },
+
   editBtn: {
     backgroundColor: COLORS.primary,
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: 24,
   },
   saveBtn: { backgroundColor: COLORS.success },
   editText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: COLORS.textDark,
+  },
+  addSubjectCard: {
+    backgroundColor: COLORS.backgroundAlt,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  addSubjectBtn: {
+    backgroundColor: COLORS.primary,
+    paddingVertical: 12,
+    borderRadius: 10,
+    alignItems: "center",
+    marginTop: 12,
+  },
+  addSubjectText: { color: "#fff", fontWeight: "700", fontSize: 13 },
+
+  subjectCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#fff",
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  subjectCode: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: COLORS.primary,
+  },
+  subjectName: {
+    fontSize: 13,
+    color: COLORS.textDark,
+    marginTop: 2,
+  },
+  deleteIcon: {
+    padding: 8,
+    backgroundColor: COLORS.dangerLight,
+    borderRadius: 8,
+  },
+
+  emptyBox: {
+    alignItems: "center",
+    paddingVertical: 24,
+  },
+  emptyText: {
+    color: COLORS.textGray,
+    marginTop: 8,
+    fontSize: 13,
+  },
+
   logoutBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: COLORS.dangerLight,
-    paddingVertical: 16,
-    borderRadius: 12,
     gap: 8,
+    backgroundColor: "#fff",
+    paddingVertical: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.danger,
+    marginTop: 8,
   },
-  logoutText: { color: COLORS.danger, fontWeight: "700", fontSize: 15 },
+  logoutText: {
+    color: COLORS.danger,
+    fontWeight: "700",
+    fontSize: 14,
+  },
 });

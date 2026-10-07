@@ -8,6 +8,9 @@ export default function TutorLayout() {
       <Stack.Screen name="request-reject" />
       <Stack.Screen name="reschedule-request" />
       <Stack.Screen name="tutor-chat" />
+      <Stack.Screen name="tutor-profile-form" />
+      <Stack.Screen name="tutor-document-upload" />
+      <Stack.Screen name="tutor-verification-status" />
     </Stack>
   );
 }

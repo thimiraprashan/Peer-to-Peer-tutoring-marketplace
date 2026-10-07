@@ -129,7 +129,7 @@ export default function TutorDashboard() {
       return (
         <TouchableOpacity
           style={styles.profileBanner}
-          onPress={() => router.push("/(tutor)/profile" as Href)}
+          onPress={() => router.push("/(tutor)/tutor-profile-form" as Href)}
         >
           <View style={styles.bannerIcon}>
             <Ionicons
@@ -354,7 +354,7 @@ export default function TutorDashboard() {
             <TouchableOpacity
               key={item.id}
               style={styles.sessionCard}
-              onPress={() => router.push("/(tutor)/sessions")}
+              onPress={() => router.push("/(tutor)/sessions" as Href)}
             >
               <View style={styles.sessionAvatar}>
                 <Text style={styles.sessionAvatarText}>

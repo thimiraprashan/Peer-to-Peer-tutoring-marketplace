@@ -7,7 +7,8 @@ import {
   getDocs,
   query,
   setDoc,
-  where
+  updateDoc,
+  where,
 } from "firebase/firestore";
 import { db } from "../firebase";
 
@@ -16,23 +17,35 @@ import { db } from "../firebase";
 // ============================================================
 
 /**
- * Create a new availability slot in Firestore.
+ * Create a new availability slot.
  * slotData = { tutorId, date, startTime, endTime, mode, isBooked: false }
  */
 export const addAvailabilitySlot = async (slotData) => {
-  await addDoc(collection(db, "availability"), slotData);
+  await addDoc(collection(db, "availability"), {
+    isBooked: false,
+    ...slotData,
+  });
 };
 
 /**
  * Get all availability slots for a specific tutor.
  */
 export const getMyAvailability = async (tutorId) => {
+  if (!tutorId) return [];
   const q = query(
     collection(db, "availability"),
     where("tutorId", "==", tutorId),
   );
   const snapshot = await getDocs(q);
   return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+};
+
+/**
+ * Update an existing availability slot (edit date/time/mode).
+ */
+export const updateAvailabilitySlot = async (slotId, data) => {
+  if (!slotId) throw new Error("slotId is required");
+  await updateDoc(doc(db, "availability", slotId), data);
 };
 
 /**
@@ -46,11 +59,8 @@ export const deleteAvailabilitySlot = async (slotId) => {
 // TUTOR PROFILE
 // ============================================================
 
-/**
- * Fetch the tutor profile document from Firestore.
- * Returns null if the document does not exist yet.
- */
 export const getTutorProfile = async (tutorId) => {
+  if (!tutorId) return null;
   const docRef = doc(db, "tutors", tutorId);
   const docSnap = await getDoc(docRef);
   if (docSnap.exists()) {
@@ -59,10 +69,6 @@ export const getTutorProfile = async (tutorId) => {
   return null;
 };
 
-/**
- * Update (or create) the tutor profile.
- * Uses setDoc with merge so the first save creates the document.
- */
 export const updateTutorProfile = async (tutorId, profileData) => {
   await setDoc(doc(db, "tutors", tutorId), profileData, { merge: true });
 };
@@ -71,9 +77,6 @@ export const updateTutorProfile = async (tutorId, profileData) => {
 // TUTOR SUBJECTS
 // ============================================================
 
-/**
- * Add a new subject/module the tutor teaches.
- */
 export const addTutorSubject = async (tutorId, subjectData) => {
   await addDoc(collection(db, "tutorSubjects"), {
     tutorId,
@@ -81,10 +84,8 @@ export const addTutorSubject = async (tutorId, subjectData) => {
   });
 };
 
-/**
- * Fetch all subjects for a tutor.
- */
 export const getTutorSubjects = async (tutorId) => {
+  if (!tutorId) return [];
   const q = query(
     collection(db, "tutorSubjects"),
     where("tutorId", "==", tutorId),
@@ -93,13 +94,73 @@ export const getTutorSubjects = async (tutorId) => {
   return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
 };
 
+export const updateTutorSubject = async (subjectId, data) => {
+  if (!subjectId) throw new Error("subjectId is required");
+  await updateDoc(doc(db, "tutorSubjects", subjectId), data);
+};
+
+export const deleteTutorSubject = async (subjectId) => {
+  await deleteDoc(doc(db, "tutorSubjects", subjectId));
+};
+
+// ============================================================
+// BOOKINGS (Tutor reads + updates status)
+// ============================================================
+
+/**
+ * Get all bookings for a tutor (pending, approved, completed, cancelled).
+ */
+export const getTutorBookings = async (tutorId) => {
+  if (!tutorId) return [];
+  const q = query(collection(db, "bookings"), where("tutorId", "==", tutorId));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+};
+
+/**
+ * Update a booking status.
+ * status: "pending" | "approved" | "completed" | "cancelled"
+ */
+export const updateBookingStatus = async (bookingId, status) => {
+  if (!bookingId) throw new Error("bookingId is required");
+  await updateDoc(doc(db, "bookings", bookingId), { status });
+};
+
+/**
+ * Propose a new time for a booking (reschedule).
+ * proposal = { date, startTime, endTime }
+ */
+export const proposeReschedule = async (bookingId, proposal) => {
+  if (!bookingId) throw new Error("bookingId is required");
+  await updateDoc(doc(db, "bookings", bookingId), {
+    rescheduleProposal: proposal,
+  });
+};
+
+// ============================================================
+// NOTIFICATIONS (cross-member agreement: M2 + M3)
+// ============================================================
+
+/**
+ * Create a notification for the other party when booking status changes.
+ * type: "booking_status" | "reschedule" | ...
+ */
+export const createNotification = async (userId, type, message, bookingId) => {
+  if (!userId) return;
+  await addDoc(collection(db, "notifications"), {
+    userId,
+    type,
+    message,
+    bookingId,
+    read: false,
+    createdAt: new Date().toISOString(),
+  });
+};
+
 // ============================================================
 // VERIFICATION REQUESTS
 // ============================================================
 
-/**
- * Submit a new verification request (reviewed later by Member 4 - Admin).
- */
 export const submitVerificationRequest = async (
   tutorId,
   documentUrl,
@@ -116,10 +177,8 @@ export const submitVerificationRequest = async (
   });
 };
 
-/**
- * Get the latest verification request for a tutor.
- */
 export const getVerificationStatus = async (tutorId) => {
+  if (!tutorId) return null;
   const q = query(
     collection(db, "verificationRequests"),
     where("tutorId", "==", tutorId),
@@ -134,10 +193,6 @@ export const getVerificationStatus = async (tutorId) => {
 // SEARCH / LIST (used by student side screens)
 // ============================================================
 
-/**
- * Fetch all tutors in the marketplace.
- * Used by the student search screen to display tutor cards.
- */
 export const fetchTutors = async () => {
   try {
     const snapshot = await getDocs(collection(db, "tutors"));
