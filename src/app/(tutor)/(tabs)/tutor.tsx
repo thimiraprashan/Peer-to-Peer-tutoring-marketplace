@@ -11,13 +11,14 @@ import {
   View,
 } from "react-native";
 import { useAuth } from "../../../contexts/AuthContext";
+import { auth } from "../../../firebase";
 import { getTutorBookings } from "../../../services/bookingService";
 import {
   getTutorProfile,
   getVerificationStatus,
 } from "../../../services/tutorService";
 
-// ---------- GREEN THEME (matches the rest of the app) ----------
+// ---------- GREEN THEME ----------
 const GREEN_THEME = {
   headerBg: "#D9E6D0",
   screenBg: "#EAF2E5",
@@ -31,6 +32,8 @@ const GREEN_THEME = {
   warningBg: "#FFF4E6",
   warningText: "#F5A623",
   infoText: "#4A90E2",
+  danger: "#E74C3C",
+  dangerLight: "#FFE8E8",
 };
 
 interface TutorBooking {
@@ -47,40 +50,75 @@ export default function TutorDashboard() {
   const router = useRouter();
   const { user } = useAuth();
 
+  // 🔑 Firebase Auth — source of truth for UID
+  const uid = auth?.currentUser?.uid;
+
   const [bookings, setBookings] = useState<TutorBooking[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [verificationStatus, setVerificationStatus] = useState<string | null>(
-    null,
+    null
   );
 
   // ---------- Load all data on focus ----------
   const loadData = async () => {
+    if (!uid) {
+      console.log("⚠️ No UID found — user not logged in");
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
     try {
-      const uid = user?.uid;
-      if (!uid) return;
+      // 🔧 Use allSettled — one failure won't break everything
+      const [bookingsResult, profileResult, verificationResult] =
+        await Promise.allSettled([
+          getTutorBookings(uid),
+          getTutorProfile(uid),
+          getVerificationStatus(uid),
+        ]);
 
-      const [bookingsData, profileData, verificationData] = await Promise.all([
-        getTutorBookings(uid),
-        getTutorProfile(uid),
-        getVerificationStatus(uid),
-      ]);
+      // Extract values with fallbacks
+      const bookingsData =
+        bookingsResult.status === "fulfilled" ? bookingsResult.value : [];
+      const profileData =
+        profileResult.status === "fulfilled" ? profileResult.value : null;
+      const verificationData =
+        verificationResult.status === "fulfilled"
+          ? verificationResult.value
+          : null;
 
+      // Log any failures for debugging
+      if (bookingsResult.status === "rejected") {
+        console.log("❌ Bookings load failed:", bookingsResult.reason);
+      }
+      if (profileResult.status === "rejected") {
+        console.log("❌ Profile load failed:", profileResult.reason);
+      }
+      if (verificationResult.status === "rejected") {
+        console.log("❌ Verification load failed:", verificationResult.reason);
+      }
+
+      console.log(
+        `✅ Dashboard loaded: ${(bookingsData as TutorBooking[]).length} bookings`
+      );
+
+      // Profile verified status
       const profileIsVerified =
         !!profileData &&
         typeof profileData === "object" &&
         "verified" in profileData &&
-        profileData.verified === true;
+        (profileData as any).verified === true;
 
       const verificationValue =
         verificationData &&
         typeof verificationData === "object" &&
         "status" in verificationData &&
-        typeof verificationData.status === "string"
-          ? verificationData.status
+        typeof (verificationData as any).status === "string"
+          ? (verificationData as any).status
           : null;
 
-      setBookings(bookingsData || []);
+      setBookings((bookingsData as TutorBooking[]) || []);
       setVerificationStatus(profileIsVerified ? "Verified" : verificationValue);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -94,7 +132,7 @@ export default function TutorDashboard() {
   useFocusEffect(
     useCallback(() => {
       loadData();
-    }, [user]),
+    }, [uid])
   );
 
   const onRefresh = () => {
@@ -105,7 +143,7 @@ export default function TutorDashboard() {
   // ---------- Filter bookings by status ----------
   const pending = bookings.filter((b) => b.status === "pending");
   const upcoming = bookings.filter((b) =>
-    ["approved", "rescheduled"].includes(b.status),
+    ["approved", "rescheduled"].includes(b.status)
   );
   const completed = bookings.filter((b) => b.status === "completed");
   const earned = completed.reduce((sum, b) => sum + (b.price || 0), 0);
@@ -219,7 +257,7 @@ export default function TutorDashboard() {
       >
         {renderProfileBanner()}
 
-        {/* Info box when pending requests exist */}
+        {/* Info box */}
         {!loading && pending.length > 0 && (
           <View style={styles.infoBox}>
             <Ionicons
@@ -289,10 +327,7 @@ export default function TutorDashboard() {
               key={item.id}
               style={styles.requestCard}
               onPress={() =>
-                router.push({
-                  pathname: "/(tutor)/RequestDetails",
-                  params: { bookingId: item.id },
-                } as Href)
+                router.push("/(tutor)/requests" as Href)
               }
             >
               <View style={styles.requestHeader}>
@@ -327,11 +362,17 @@ export default function TutorDashboard() {
                 </View>
               </View>
               <View style={styles.requestActions}>
-                <TouchableOpacity style={[styles.actionBtn, styles.rejectBtn]}>
-                  <Text style={styles.rejectText}>Reject</Text>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.rejectBtn]}
+                  onPress={() => router.push("/(tutor)/requests" as Href)}
+                >
+                  <Text style={styles.rejectText}>View Details</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={[styles.actionBtn, styles.acceptBtn]}>
-                  <Text style={styles.acceptText}>View</Text>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.acceptBtn]}
+                  onPress={() => router.push("/(tutor)/requests" as Href)}
+                >
+                  <Text style={styles.acceptText}>Manage</Text>
                 </TouchableOpacity>
               </View>
             </TouchableOpacity>
@@ -423,7 +464,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
 
-  // Profile banner
   profileBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -508,7 +548,6 @@ const styles = StyleSheet.create({
     color: GREEN_THEME.darkGreenText,
   },
 
-  // Info box
   infoBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -525,7 +564,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
 
-  // Stats
   statsRow: { flexDirection: "row", padding: 20, gap: 10 },
   statCard: {
     flex: 1,
@@ -553,7 +591,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
-  // Request card
   requestCard: {
     backgroundColor: GREEN_THEME.white,
     marginHorizontal: 20,
@@ -606,12 +643,11 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: "center",
   },
-  rejectBtn: { backgroundColor: "#FFE8E8" },
+  rejectBtn: { backgroundColor: "#EEF4FF" },
   acceptBtn: { backgroundColor: GREEN_THEME.primaryGreen },
-  rejectText: { color: "#E74C3C", fontWeight: "600", fontSize: 13 },
+  rejectText: { color: GREEN_THEME.infoText, fontWeight: "600", fontSize: 13 },
   acceptText: { color: GREEN_THEME.white, fontWeight: "600", fontSize: 13 },
 
-  // Session card
   sessionCard: {
     flexDirection: "row",
     alignItems: "center",

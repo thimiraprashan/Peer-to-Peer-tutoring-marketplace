@@ -1,33 +1,25 @@
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { router, useLocalSearchParams, type Href } from "expo-router";
-import {
-  getDownloadURL,
-  ref,
-  uploadBytesResumable,
-} from "firebase/storage";
 import { useState } from "react";
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
 import { useAuth } from "../../contexts/AuthContext";
-import { auth, storage } from "../../firebase";
+import { auth } from "../../firebase";
 import {
-  addTutorSubject,
-  submitVerificationRequest,
-  updateTutorProfile,
+    addTutorSubject,
+    submitVerificationRequest,
+    updateTutorProfile,
 } from "../../services/tutorService";
 
-// ==========================================
-// GREEN THEME COLORS
-// ==========================================
 const GREEN_THEME = {
   headerBg: "#D9E6D0",
   screenBg: "#EAF2E5",
@@ -42,32 +34,20 @@ const GREEN_THEME = {
 };
 
 // ============================================================
-// 🔑 BULLETPROOF UID RETRIEVAL
+// UID + EMAIL HELPERS
 // ============================================================
 function resolveUid(user: any): string | null {
   const firebaseUid = auth?.currentUser?.uid;
   if (firebaseUid) return firebaseUid;
-
   if (user && typeof user === "object") {
-    const candidates = [
-      user.uid,
-      user.id,
-      user._id,
-      user.userId,
-      user.userID,
-      user.user_id,
-    ];
+    const candidates = [user.uid, user.id, user._id, user.userId];
     for (const c of candidates) {
       if (typeof c === "string" && c.length > 0) return c;
     }
   }
-
   return null;
 }
 
-// ============================================================
-// 🔑 BULLETPROOF EMAIL RETRIEVAL
-// ============================================================
 function resolveEmail(user: any): string {
   return (
     auth?.currentUser?.email ||
@@ -97,7 +77,7 @@ export default function TutorDocumentUpload() {
   }>({});
 
   // ------------------------------------------
-  // Pick image from gallery
+  // Pick image
   // ------------------------------------------
   const pickImage = async (type: "id" | "cv") => {
     try {
@@ -106,7 +86,7 @@ export default function TutorDocumentUpload() {
       if (!permission.granted) {
         Alert.alert(
           "Permission Required",
-          "Please allow access to your gallery."
+          "Please allow access to your gallery.",
         );
         return;
       }
@@ -134,9 +114,6 @@ export default function TutorDocumentUpload() {
     }
   };
 
-  // ------------------------------------------
-  // Validate both documents uploaded
-  // ------------------------------------------
   const validate = () => {
     const newErrors: { studentIdImage?: string; cvImage?: string } = {};
     if (!studentIdImage)
@@ -147,56 +124,50 @@ export default function TutorDocumentUpload() {
   };
 
   // ============================================
-  // Upload local image URI to Firebase Storage
-  // Uses uploadBytesResumable (works in RN/Expo)
+  // Upload to ImgBB (replaces Firebase Storage)
   // ============================================
-  const uploadImageToStorage = (
-    uri: string,
-    path: string
-  ): Promise<string> => {
-    return new Promise(async (resolve, reject) => {
-      try {
-        const response = await fetch(uri);
-        const blob = await response.blob();
-        const storageRef = ref(storage, path);
+  const uploadToImgBB = async (uri: string, name: string): Promise<string> => {
+    const apiKey = process.env.EXPO_PUBLIC_IMGBB_API_KEY;
 
-        const uploadTask = uploadBytesResumable(storageRef, blob, {
-          contentType: "image/jpeg",
-        });
+    if (!apiKey) {
+      throw new Error(
+        "ImgBB API key not configured. Check .env for EXPO_PUBLIC_IMGBB_API_KEY.",
+      );
+    }
 
-        uploadTask.on(
-          "state_changed",
-          (snapshot) => {
-            const progress =
-              (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-            const label = path.includes("studentId") ? "ID" : "CV";
-            setUploadProgress(
-              `Uploading ${label}: ${progress.toFixed(0)}%`
-            );
-            console.log(`📤 ${path}: ${progress.toFixed(0)}%`);
-          },
-          (error) => {
-            console.error(`❌ Upload error for ${path}:`, error);
-            reject(error);
-          },
-          async () => {
-            try {
-              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-              console.log(`✅ ${path} uploaded:`, downloadURL);
-              resolve(downloadURL);
-            } catch (err) {
-              reject(err);
-            }
-          }
-        );
-      } catch (error) {
-        reject(error);
-      }
-    });
+    const formData = new FormData();
+    formData.append("image", {
+      uri,
+      type: "image/jpeg",
+      name: `${name}-${Date.now()}.jpg`,
+    } as any);
+
+    const response = await fetch(
+      `https://api.imgbb.com/1/upload?key=${apiKey}`,
+      {
+        method: "POST",
+        body: formData,
+      },
+    );
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(
+        errorData?.error?.message || `ImgBB upload failed (${response.status})`,
+      );
+    }
+
+    const data = await response.json();
+
+    if (!data?.success || !data?.data?.url) {
+      throw new Error("ImgBB returned an unexpected response");
+    }
+
+    return data.data.url; // ImgBB URL — data.data.url
   };
 
   // ------------------------------------------
-  // Submit everything to Firestore + Storage
+  // Submit everything
   // ------------------------------------------
   const handleSubmit = async () => {
     if (!validate()) {
@@ -204,45 +175,27 @@ export default function TutorDocumentUpload() {
       return;
     }
 
-    console.log("🔍 AuthContext user:", JSON.stringify(user, null, 2));
-    console.log("🔍 auth.currentUser?.uid:", auth?.currentUser?.uid);
-    console.log("🔍 auth.currentUser?.email:", auth?.currentUser?.email);
-
     const uid = resolveUid(user);
     const email = resolveEmail(user);
 
-    console.log("✅ Resolved UID:", uid);
-    console.log("✅ Resolved email:", email);
-
     if (!uid) {
-      Alert.alert(
-        "Error",
-        "You must be logged in. Please log out and log in again."
-      );
+      Alert.alert("Error", "You must be logged in.");
       return;
     }
 
     setUploading(true);
-    setUploadProgress("Starting upload...");
+    setUploadProgress("Uploading documents to ImgBB...");
 
     try {
-      const timestamp = Date.now();
-
-      // ---------- 1. Upload both images to Firebase Storage ----------
+      // ---------- 1. Upload both images to ImgBB ----------
       const [idUrl, cvUrl] = await Promise.all([
-        uploadImageToStorage(
-          studentIdImage!,
-          `verification/${uid}/studentId-${timestamp}.jpg`
-        ),
-        uploadImageToStorage(
-          cvImage!,
-          `verification/${uid}/cv-${timestamp}.jpg`
-        ),
+        uploadToImgBB(studentIdImage!, "student-id"),
+        uploadToImgBB(cvImage!, "cv"),
       ]);
 
       setUploadProgress("Saving profile...");
 
-      // ---------- 2. Save profile fields to Firestore tutors/{uid} ----------
+      // ---------- 2. Save tutor profile ----------
       await updateTutorProfile(uid, {
         university: params.university || "",
         faculty: params.faculty || "",
@@ -251,7 +204,7 @@ export default function TutorDocumentUpload() {
         verified: false,
       });
 
-      // ---------- 3. Save subjects to tutorSubjects collection ----------
+      // ---------- 3. Save subjects ----------
       const subjects: string[] = params.subjects
         ? JSON.parse(params.subjects)
         : [];
@@ -262,8 +215,8 @@ export default function TutorDocumentUpload() {
             moduleCode: subjectName,
             moduleName: subjectName,
             subjectArea: subjectName,
-          })
-        )
+          }),
+        ),
       );
 
       setUploadProgress("Creating verification request...");
@@ -272,7 +225,7 @@ export default function TutorDocumentUpload() {
       await submitVerificationRequest(
         uid,
         JSON.stringify({ studentIdUrl: idUrl, cvUrl: cvUrl }),
-        email
+        email,
       );
 
       setUploading(false);
@@ -287,38 +240,22 @@ export default function TutorDocumentUpload() {
             onPress: () =>
               router.replace("/(tutor)/tutor-verification-status" as Href),
           },
-        ]
+        ],
       );
     } catch (error: any) {
       console.error("❌ Submit error:", error);
-      console.error("❌ Error code:", error?.code);
-      console.error("❌ Error message:", error?.message);
       setUploading(false);
       setUploadProgress("");
-
-      // Better error messages for common cases
-      let userMessage = "Could not submit. Please try again.";
-      if (error?.code === "storage/unauthorized") {
-        userMessage =
-          "Storage permission denied. Please check Firebase Storage rules.";
-      } else if (error?.code === "storage/canceled") {
-        userMessage = "Upload was canceled.";
-      } else if (error?.code === "storage/retry-limit-exceeded") {
-        userMessage = "Upload timed out. Check your internet connection.";
-      } else if (error?.code === "storage/unknown") {
-        userMessage =
-          "Upload failed. Check Firebase Storage rules and bucket setup.";
-      } else if (error?.message) {
-        userMessage = error.message;
-      }
-
-      Alert.alert("Upload Error", userMessage);
+      Alert.alert(
+        "Upload Error",
+        error?.message || "Could not submit. Please try again.",
+      );
     }
   };
 
   return (
     <View style={styles.container}>
-      {/* ================= HEADER ================= */}
+      {/* HEADER */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()}>
           <Ionicons
@@ -331,7 +268,7 @@ export default function TutorDocumentUpload() {
         <View style={{ width: 24 }} />
       </View>
 
-      {/* ================= STEP INDICATOR ================= */}
+      {/* STEP INDICATOR */}
       <View style={styles.stepRow}>
         <View
           style={[
@@ -353,7 +290,6 @@ export default function TutorDocumentUpload() {
         contentContainerStyle={{ padding: 20, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Info box */}
         <View style={styles.infoBox}>
           <Ionicons
             name="information-circle-outline"
@@ -365,7 +301,7 @@ export default function TutorDocumentUpload() {
           </Text>
         </View>
 
-        {/* ---------- STUDENT ID ---------- */}
+        {/* STUDENT ID */}
         <Text style={styles.label}>Student ID Card *</Text>
         <TouchableOpacity
           style={[
@@ -388,7 +324,7 @@ export default function TutorDocumentUpload() {
                 color={GREEN_THEME.primaryGreen}
               />
               <Text style={styles.uploadText}>Tap to upload</Text>
-              <Text style={styles.uploadSub}>JPG or PNG, max 5MB</Text>
+              <Text style={styles.uploadSub}>JPG or PNG</Text>
             </>
           )}
         </TouchableOpacity>
@@ -396,7 +332,7 @@ export default function TutorDocumentUpload() {
           <Text style={styles.errorText}>{errors.studentIdImage}</Text>
         ) : null}
 
-        {/* ---------- CV / RESUME ---------- */}
+        {/* CV */}
         <Text style={styles.label}>CV / Resume *</Text>
         <TouchableOpacity
           style={[
@@ -426,12 +362,12 @@ export default function TutorDocumentUpload() {
           <Text style={styles.errorText}>{errors.cvImage}</Text>
         ) : null}
 
-        {/* ================= PROGRESS TEXT ================= */}
+        {/* PROGRESS */}
         {uploading && uploadProgress ? (
           <Text style={styles.progressText}>{uploadProgress}</Text>
         ) : null}
 
-        {/* ================= SUBMIT BUTTON ================= */}
+        {/* SUBMIT */}
         <TouchableOpacity
           style={[styles.submitBtn, uploading && { opacity: 0.7 }]}
           onPress={handleSubmit}
@@ -457,7 +393,6 @@ export default function TutorDocumentUpload() {
 // ============================================================
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: GREEN_THEME.screenBg },
-
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -472,7 +407,6 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     color: GREEN_THEME.darkGreenText,
   },
-
   stepRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -494,7 +428,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginBottom: 8,
   },
-
   infoBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -505,7 +438,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   infoText: { flex: 1, fontSize: 12, color: GREEN_THEME.darkGreenText },
-
   label: {
     fontSize: 13,
     fontWeight: "700",
@@ -513,7 +445,6 @@ const styles = StyleSheet.create({
     marginTop: 18,
     marginBottom: 10,
   },
-
   uploadBox: {
     backgroundColor: GREEN_THEME.white,
     borderRadius: 12,
@@ -527,17 +458,19 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   uploadBoxError: { borderColor: GREEN_THEME.errorRed },
-  uploadText: { fontSize: 14, fontWeight: "600", color: GREEN_THEME.textDark },
+  uploadText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: GREEN_THEME.textDark,
+  },
   uploadSub: { fontSize: 11, color: GREEN_THEME.textGray },
   previewImage: { width: "100%", height: "100%", resizeMode: "cover" },
-
   errorText: {
     fontSize: 11,
     color: GREEN_THEME.errorRed,
     marginTop: 4,
     marginLeft: 2,
   },
-
   progressText: {
     fontSize: 12,
     color: GREEN_THEME.primaryGreen,
@@ -545,7 +478,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: 16,
   },
-
   submitBtn: {
     backgroundColor: GREEN_THEME.primaryGreen,
     paddingVertical: 15,
@@ -554,7 +486,6 @@ const styles = StyleSheet.create({
     marginTop: 30,
   },
   submitText: { color: GREEN_THEME.white, fontSize: 15, fontWeight: "600" },
-
   footerNote: {
     fontSize: 11,
     color: GREEN_THEME.textGray,
