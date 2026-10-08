@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
+import { useEffect, useState } from 'react';
 import { auth } from '../firebase';
 import { getUserProfile } from '../services/authService';
 
@@ -25,7 +25,7 @@ export function useCurrentUser() {
       if (firebaseUser) {
         try {
           const userProfile = await getUserProfile(firebaseUser.uid);
-          setProfile(userProfile);
+          setProfile(userProfile as UserProfile | null);
         } catch (error) {
           console.error('Error fetching user profile:', error);
           setProfile(null);
