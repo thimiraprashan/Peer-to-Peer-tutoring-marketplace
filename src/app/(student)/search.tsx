@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   Pressable,
   RefreshControl,
@@ -11,7 +12,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,12 +20,19 @@ import { colors } from '../../theme/colors';
 import { Avatar } from '../../components/ui/Avatar';
 import { VerifiedBadge } from '../../components/ui/VerifiedBadge';
 import { AppButton } from '../../components/ui/AppButton';
+import { useCurrentUser } from '../../hooks/useCurrentUser';
 import { formatNextSlot, searchTutors } from '../../services/tutorService';
+import {
+  addFavourite,
+  getFavouriteTutorIds,
+  removeFavourite,
+} from '../../services/favouriteService';
 
 export default function SearchScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ q?: string }>();
+  const { user } = useCurrentUser();
 
   // Search input state
   const [searchText, setSearchText] = useState(params.q || '');
@@ -36,6 +44,10 @@ export default function SearchScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Favourites state (Set of tutorIds)
+  const [favouriteIds, setFavouriteIds] = useState<Set<string>>(new Set());
+  const [showOnlyFavourites, setShowOnlyFavourites] = useState(false);
 
   // Sort state: 'top_rated' | 'lowest_price'
   const [sortBy, setSortBy] = useState<'top_rated' | 'lowest_price'>('top_rated');
@@ -62,6 +74,24 @@ export default function SearchScreen() {
     if (onlyAvailableSlots) count++;
     return count;
   }, [minRating, maxPrice, sessionMode, onlyAvailableSlots]);
+
+  // Load favourites for logged-in user
+  const loadFavourites = useCallback(async () => {
+    if (!user?.uid) return;
+    try {
+      const ids = await getFavouriteTutorIds(user.uid);
+      setFavouriteIds(new Set(ids));
+    } catch {
+      // Silently handle favourite load failure
+    }
+  }, [user?.uid]);
+
+  // Reload favourites when screen gains focus
+  useFocusEffect(
+    useCallback(() => {
+      loadFavourites();
+    }, [loadFavourites])
+  );
 
   // Fetch tutors from service
   const loadSearchResults = useCallback(async (query: string) => {
@@ -117,9 +147,51 @@ export default function SearchScreen() {
   }, [debouncedQuery, loadSearchResults]);
 
   // Pull to refresh
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setRefreshing(true);
-    loadSearchResults(debouncedQuery);
+    await Promise.all([loadSearchResults(debouncedQuery), loadFavourites()]);
+    setRefreshing(false);
+  };
+
+  // Optimistic Toggle Favourite
+  const handleToggleFavourite = async (tutorId: string) => {
+    if (!user?.uid) {
+      Alert.alert('Sign in required', 'Please log in to save favourite tutors.');
+      return;
+    }
+
+    const isFav = favouriteIds.has(tutorId);
+
+    // Optimistic UI update
+    setFavouriteIds((prev) => {
+      const next = new Set(prev);
+      if (isFav) {
+        next.delete(tutorId);
+      } else {
+        next.add(tutorId);
+      }
+      return next;
+    });
+
+    try {
+      if (isFav) {
+        await removeFavourite(user.uid, tutorId);
+      } else {
+        await addFavourite(user.uid, tutorId);
+      }
+    } catch {
+      // Revert optimistic update on failure
+      setFavouriteIds((prev) => {
+        const next = new Set(prev);
+        if (isFav) {
+          next.add(tutorId);
+        } else {
+          next.delete(tutorId);
+        }
+        return next;
+      });
+      Alert.alert('Error', 'Could not update favourites. Please try again.');
+    }
   };
 
   // Open filter modal and stage current values
@@ -157,6 +229,11 @@ export default function SearchScreen() {
   const filteredAndSortedTutors = useMemo(() => {
     let result = [...rawTutors];
 
+    // Filter by Favourites toggle
+    if (showOnlyFavourites) {
+      result = result.filter((t) => favouriteIds.has(t.tutorId));
+    }
+
     // Filter by min rating
     if (minRating !== null) {
       result = result.filter((t) => (t.ratingAvg || 0) >= minRating);
@@ -188,7 +265,16 @@ export default function SearchScreen() {
     }
 
     return result;
-  }, [rawTutors, minRating, maxPrice, sessionMode, onlyAvailableSlots, sortBy]);
+  }, [
+    rawTutors,
+    showOnlyFavourites,
+    favouriteIds,
+    minRating,
+    maxPrice,
+    sessionMode,
+    onlyAvailableSlots,
+    sortBy,
+  ]);
 
   // Back navigation
   const handleBack = () => {
@@ -289,7 +375,7 @@ export default function SearchScreen() {
           </Pressable>
         </View>
 
-        {/* 6. Sort Chips */}
+        {/* Sort & Favourites Chips Row */}
         <View style={styles.sortChipsRow}>
           <Pressable
             onPress={() => setSortBy('top_rated')}
@@ -334,6 +420,34 @@ export default function SearchScreen() {
               Lowest price
             </Text>
           </Pressable>
+
+          {/* Favourites Toggle Chip */}
+          <Pressable
+            onPress={() => setShowOnlyFavourites((prev) => !prev)}
+            accessibilityRole="button"
+            accessibilityLabel="Show favourite tutors"
+            style={[
+              styles.sortChip,
+              showOnlyFavourites ? styles.favChipActive : styles.sortChipInactive,
+            ]}
+          >
+            <Ionicons
+              name={showOnlyFavourites ? 'heart' : 'heart-outline'}
+              size={14}
+              color={showOnlyFavourites ? colors.card : colors.error}
+              style={styles.chipHeartIcon}
+            />
+            <Text
+              style={[
+                styles.sortChipText,
+                showOnlyFavourites
+                  ? styles.sortChipTextActive
+                  : styles.sortChipTextInactive,
+              ]}
+            >
+              Favourites
+            </Text>
+          </Pressable>
         </View>
 
         {/* 3. Result Count Line */}
@@ -364,15 +478,24 @@ export default function SearchScreen() {
           </View>
         ) : filteredAndSortedTutors.length === 0 ? (
           <View style={styles.stateCard}>
-            <Ionicons name="search-outline" size={44} color={colors.mutedText} />
+            <Ionicons
+              name={showOnlyFavourites ? 'heart-dislike-outline' : 'search-outline'}
+              size={44}
+              color={colors.mutedText}
+            />
             <Text style={styles.emptyText}>
-              No tutors found. Try another module code or clear the filters.
+              {showOnlyFavourites
+                ? 'No favourite tutors yet. Tap the heart on a tutor to save them.'
+                : 'No tutors found. Try another module code or clear the filters.'}
             </Text>
-            {activeFilterCount > 0 ? (
+            {activeFilterCount > 0 || showOnlyFavourites ? (
               <View style={styles.clearFiltersBtnWrapper}>
                 <AppButton
-                  title="Clear filters"
-                  onPress={handleResetFilters}
+                  title={showOnlyFavourites ? 'Show all tutors' : 'Clear filters'}
+                  onPress={() => {
+                    if (showOnlyFavourites) setShowOnlyFavourites(false);
+                    if (activeFilterCount > 0) handleResetFilters();
+                  }}
                   variant="outline"
                 />
               </View>
@@ -380,65 +503,85 @@ export default function SearchScreen() {
           </View>
         ) : (
           <View style={styles.tutorCardsList}>
-            {filteredAndSortedTutors.map((tutor) => (
-              <Pressable
-                key={tutor.tutorId}
-                onPress={() => {
-                  // TODO: Navigate to tutor profile screen once implemented
-                }}
-                accessibilityRole="button"
-                accessibilityLabel={`Tutor ${tutor.name}`}
-                style={({ pressed }) => [
-                  styles.tutorCard,
-                  pressed && styles.tutorCardPressed,
-                ]}
-              >
-                {/* Top Row: Avatar, Name, Rating, Heart placeholder & Verified */}
-                <View style={styles.cardTopRow}>
-                  <Avatar name={tutor.name} size={48} />
-                  <View style={styles.tutorNameContainer}>
-                    <Text style={styles.tutorNameText}>{tutor.name}</Text>
-                    <View style={styles.ratingRow}>
-                      <Ionicons name="star" size={14} color={colors.star} />
-                      <Text style={styles.ratingText}>
-                        {Number(tutor.ratingAvg || 5).toFixed(1)}{' '}
-                        <Text style={styles.ratingCount}>
-                          ({tutor.ratingCount || 0})
+            {filteredAndSortedTutors.map((tutor) => {
+              const isFav = favouriteIds.has(tutor.tutorId);
+
+              return (
+                <Pressable
+                  key={tutor.tutorId}
+                  onPress={() => {
+                    // TODO: Navigate to tutor profile screen once implemented
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Tutor ${tutor.name}`}
+                  style={({ pressed }) => [
+                    styles.tutorCard,
+                    pressed && styles.tutorCardPressed,
+                  ]}
+                >
+                  {/* Top Row: Avatar, Name, Rating, Heart button & Verified */}
+                  <View style={styles.cardTopRow}>
+                    <Avatar name={tutor.name} size={48} />
+                    <View style={styles.tutorNameContainer}>
+                      <Text style={styles.tutorNameText}>{tutor.name}</Text>
+                      <View style={styles.ratingRow}>
+                        <Ionicons name="star" size={14} color={colors.star} />
+                        <Text style={styles.ratingText}>
+                          {Number(tutor.ratingAvg || 5).toFixed(1)}{' '}
+                          <Text style={styles.ratingCount}>
+                            ({tutor.ratingCount || 0})
+                          </Text>
                         </Text>
-                      </Text>
+                      </View>
+                    </View>
+                    <View style={styles.cardTopRight}>
+                      {/* Heart favourite button (>=48px touch target) */}
+                      <Pressable
+                        onPress={() => handleToggleFavourite(tutor.tutorId)}
+                        accessibilityRole="button"
+                        accessibilityLabel={
+                          isFav ? 'Remove from favourites' : 'Add to favourites'
+                        }
+                        style={styles.heartButton}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <Ionicons
+                          name={isFav ? 'heart' : 'heart-outline'}
+                          size={24}
+                          color={isFav ? colors.error : colors.mutedText}
+                        />
+                      </Pressable>
+
+                      {tutor.verified ? <VerifiedBadge /> : null}
                     </View>
                   </View>
-                  <View style={styles.cardTopRight}>
-                    {/* TODO: Heart favorite button will go here */}
-                    {tutor.verified ? <VerifiedBadge /> : null}
+
+                  {/* Middle Module Row */}
+                  <Text style={styles.moduleNameText} numberOfLines={1}>
+                    {tutor.moduleCode}
+                    {tutor.moduleName ? ` - ${tutor.moduleName}` : ''}
+                  </Text>
+
+                  {/* Thin Divider */}
+                  <View style={styles.divider} />
+
+                  {/* Bottom Row: Price & Next Slot */}
+                  <View style={styles.cardBottomRow}>
+                    <Text style={styles.priceText}>
+                      Rs. {Number(tutor.hourlyRate || 0).toLocaleString()} / hour
+                    </Text>
+                    <Text
+                      style={[
+                        styles.nextSlotText,
+                        !tutor.nextSlot && styles.nextSlotEmpty,
+                      ]}
+                    >
+                      Next: {formatNextSlot(tutor.nextSlot)}
+                    </Text>
                   </View>
-                </View>
-
-                {/* Middle Module Row */}
-                <Text style={styles.moduleNameText} numberOfLines={1}>
-                  {tutor.moduleCode}
-                  {tutor.moduleName ? ` - ${tutor.moduleName}` : ''}
-                </Text>
-
-                {/* Thin Divider */}
-                <View style={styles.divider} />
-
-                {/* Bottom Row: Price & Next Slot */}
-                <View style={styles.cardBottomRow}>
-                  <Text style={styles.priceText}>
-                    Rs. {Number(tutor.hourlyRate || 0).toLocaleString()} / hour
-                  </Text>
-                  <Text
-                    style={[
-                      styles.nextSlotText,
-                      !tutor.nextSlot && styles.nextSlotEmpty,
-                    ]}
-                  >
-                    Next: {formatNextSlot(tutor.nextSlot)}
-                  </Text>
-                </View>
-              </Pressable>
-            ))}
+                </Pressable>
+              );
+            })}
           </View>
         )}
       </ScrollView>
@@ -711,6 +854,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sortChip: {
+    flexDirection: 'row',
     paddingVertical: 8,
     paddingHorizontal: 14,
     borderRadius: 20,
@@ -725,6 +869,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
+  },
+  favChipActive: {
+    backgroundColor: colors.error,
+  },
+  chipHeartIcon: {
+    marginRight: 4,
   },
   sortChipText: {
     fontSize: 13,
@@ -765,7 +915,7 @@ const styles = StyleSheet.create({
   },
   clearFiltersBtnWrapper: {
     marginTop: 16,
-    width: 150,
+    width: 160,
   },
   errorText: {
     fontSize: 14,
@@ -825,7 +975,15 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   cardTopRight: {
-    alignItems: 'flex-end',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  heartButton: {
+    width: 48,
+    height: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   moduleNameText: {
     fontSize: 14,
