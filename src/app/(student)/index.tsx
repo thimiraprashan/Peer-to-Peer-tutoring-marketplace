@@ -1,4 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
+import { StatusBar } from "expo-status-bar";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -10,25 +13,22 @@ import {
   Text,
   TextInput,
   View,
-} from 'react-native';
-import { useRouter } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../../theme/colors';
-import { Avatar } from '../../components/ui/Avatar';
-import { VerifiedBadge } from '../../components/ui/VerifiedBadge';
-import { AppButton } from '../../components/ui/AppButton';
-import { AppInput } from '../../components/ui/AppInput';
-import { useCurrentUser } from '../../hooks/useCurrentUser';
-import { getFeaturedTutors } from '../../services/tutorService';
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { AppButton } from "../../components/ui/AppButton";
+import { AppInput } from "../../components/ui/AppInput";
+import { Avatar } from "../../components/ui/Avatar";
+import { VerifiedBadge } from "../../components/ui/VerifiedBadge";
+import { useCurrentUser } from "../../hooks/useCurrentUser";
 import {
   addSavedModule,
   getSavedModules,
   removeSavedModule,
-} from '../../services/savedModuleService';
+} from "../../services/savedModuleService";
+import { fetchTutors } from "../../services/tutorService";
+import { colors } from "../../theme/colors";
 
-const FILTER_SUBJECTS = ['IT', 'Business', 'Engineering'];
+const FILTER_SUBJECTS = ["IT", "Business", "Engineering"];
 
 export default function StudentHome() {
   const router = useRouter();
@@ -36,7 +36,7 @@ export default function StudentHome() {
   const { user, profile } = useCurrentUser();
 
   // Search & filter state
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
 
   // Tutors list state
@@ -52,19 +52,23 @@ export default function StudentHome() {
 
   // Add Module Modal state
   const [modalVisible, setModalVisible] = useState(false);
-  const [newCode, setNewCode] = useState('');
-  const [newName, setNewName] = useState('');
+  const [newCode, setNewCode] = useState("");
+  const [newName, setNewName] = useState("");
   const [savingModule, setSavingModule] = useState(false);
-  const [formError, setFormError] = useState<{ code?: string; name?: string; general?: string }>({});
+  const [formError, setFormError] = useState<{
+    code?: string;
+    name?: string;
+    general?: string;
+  }>({});
 
   // 1. Load tutors from service
   const loadTutors = useCallback(async (subject: string | null) => {
     setTutorError(null);
     try {
-      const data = await getFeaturedTutors(subject);
+      const data = await fetchTutors();
       setTutors(data);
     } catch {
-      setTutorError('Unable to load tutors. Please check your connection.');
+      setTutorError("Unable to load tutors. Please check your connection.");
     } finally {
       setLoadingTutors(false);
       setRefreshing(false);
@@ -79,7 +83,7 @@ export default function StudentHome() {
       const data = await getSavedModules(user.uid);
       setSavedModules(data);
     } catch {
-      setModuleError('Could not load modules.');
+      setModuleError("Could not load modules.");
     } finally {
       setLoadingModules(false);
     }
@@ -115,11 +119,11 @@ export default function StudentHome() {
     const query = searchQuery.trim();
     if (query) {
       router.push({
-        pathname: '/(student)/search',
+        pathname: "/(student)/search",
         params: { q: query },
       } as any);
     } else {
-      router.push('/(student)/search' as any);
+      router.push("/(student)/search" as any);
     }
   };
 
@@ -130,13 +134,13 @@ export default function StudentHome() {
     const errors: { code?: string; name?: string; general?: string } = {};
 
     if (!upperCode) {
-      errors.code = 'Module code is required';
+      errors.code = "Module code is required";
     } else if (upperCode.length < 5 || upperCode.length > 8) {
-      errors.code = 'Must be between 5 and 8 characters (e.g., IT3010)';
+      errors.code = "Must be between 5 and 8 characters (e.g., IT3010)";
     }
 
     if (!trimmedName) {
-      errors.name = 'Module name is required';
+      errors.name = "Module name is required";
     }
 
     if (Object.keys(errors).length > 0) {
@@ -149,11 +153,11 @@ export default function StudentHome() {
     try {
       await addSavedModule(user?.uid, upperCode, trimmedName);
       setModalVisible(false);
-      setNewCode('');
-      setNewName('');
+      setNewCode("");
+      setNewName("");
       loadSavedModules();
     } catch (err: any) {
-      setFormError({ general: err.message || 'Failed to save module.' });
+      setFormError({ general: err.message || "Failed to save module." });
     } finally {
       setSavingModule(false);
     }
@@ -161,29 +165,27 @@ export default function StudentHome() {
 
   // Remove saved module handler with confirmation alert
   const handleConfirmRemove = (mod: any) => {
-    Alert.alert(
-      'Remove Module',
-      `Remove ${mod.moduleCode}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await removeSavedModule(mod.id);
-              loadSavedModules();
-            } catch {
-              Alert.alert('Error', 'Could not remove module.');
-            }
-          },
+    Alert.alert("Remove Module", `Remove ${mod.moduleCode}?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await removeSavedModule(mod.id);
+            loadSavedModules();
+          } catch {
+            Alert.alert("Error", "Could not remove module.");
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   // Extract first name for greeting
-  const firstName = profile?.name ? profile.name.trim().split(' ')[0] : 'Student';
+  const firstName = profile?.name
+    ? profile.name.trim().split(" ")[0]
+    : "Student";
 
   return (
     <View style={styles.screenWrapper}>
@@ -214,13 +216,13 @@ export default function StudentHome() {
             <Text style={styles.subGreetingText}>Ready to learn today?</Text>
           </View>
           <Pressable
-            onPress={() => router.push('/(student)/profile' as any)}
+            onPress={() => router.push("/(student)/profile" as any)}
             accessibilityRole="button"
             accessibilityLabel="Open profile"
             style={styles.avatarTouchable}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <Avatar name={profile?.name || 'Student'} size={48} />
+            <Avatar name={profile?.name || "Student"} size={48} />
           </Pressable>
         </View>
 
@@ -267,7 +269,9 @@ export default function StudentHome() {
                   <Text
                     style={[
                       styles.chipText,
-                      isSelected ? styles.chipTextSelected : styles.chipTextOutline,
+                      isSelected
+                        ? styles.chipTextSelected
+                        : styles.chipTextOutline,
                     ]}
                   >
                     {subject}
@@ -305,7 +309,11 @@ export default function StudentHome() {
           <Text style={styles.moduleErrorText}>{moduleError}</Text>
         ) : savedModules.length === 0 ? (
           <View style={styles.emptyModulesCard}>
-            <Ionicons name="bookmark-outline" size={24} color={colors.mutedText} />
+            <Ionicons
+              name="bookmark-outline"
+              size={24}
+              color={colors.mutedText}
+            />
             <Text style={styles.emptyModulesText}>
               No saved modules yet. Tap + Add to save the ones you study.
             </Text>
@@ -321,7 +329,7 @@ export default function StudentHome() {
                 <Pressable
                   onPress={() =>
                     router.push({
-                      pathname: '/(student)/search',
+                      pathname: "/(student)/search",
                       params: { q: mod.moduleCode },
                     } as any)
                   }
@@ -354,7 +362,7 @@ export default function StudentHome() {
         <View style={[styles.sectionHeader, { marginTop: 12 }]}>
           <Text style={styles.sectionTitle}>Tutors</Text>
           <Pressable
-            onPress={() => router.push('/(student)/search' as any)}
+            onPress={() => router.push("/(student)/search" as any)}
             accessibilityRole="button"
             accessibilityLabel="See all tutors"
             style={styles.seeAllTouchable}
@@ -371,7 +379,11 @@ export default function StudentHome() {
           </View>
         ) : tutorError ? (
           <View style={styles.stateCard}>
-            <Ionicons name="alert-circle-outline" size={36} color={colors.error} />
+            <Ionicons
+              name="alert-circle-outline"
+              size={36}
+              color={colors.error}
+            />
             <Text style={styles.errorText}>{tutorError}</Text>
             <View style={styles.retryButtonWrapper}>
               <AppButton
@@ -383,8 +395,14 @@ export default function StudentHome() {
           </View>
         ) : tutors.length === 0 ? (
           <View style={styles.stateCard}>
-            <Ionicons name="school-outline" size={40} color={colors.mutedText} />
-            <Text style={styles.emptyText}>No tutors found for this subject</Text>
+            <Ionicons
+              name="school-outline"
+              size={40}
+              color={colors.mutedText}
+            />
+            <Text style={styles.emptyText}>
+              No tutors found for this subject
+            </Text>
           </View>
         ) : (
           <View style={styles.tutorsList}>
@@ -408,7 +426,7 @@ export default function StudentHome() {
                   <View style={styles.ratingRow}>
                     <Ionicons name="star" size={14} color={colors.star} />
                     <Text style={styles.ratingText}>
-                      {Number(tutor.ratingAvg || 5).toFixed(1)}{' '}
+                      {Number(tutor.ratingAvg || 5).toFixed(1)}{" "}
                       <Text style={styles.ratingCount}>
                         ({tutor.ratingCount || 0})
                       </Text>
@@ -416,7 +434,7 @@ export default function StudentHome() {
                   </View>
                   <Text style={styles.moduleText} numberOfLines={1}>
                     {tutor.moduleCode}
-                    {tutor.moduleName ? ` - ${tutor.moduleName}` : ''}
+                    {tutor.moduleName ? ` - ${tutor.moduleName}` : ""}
                   </Text>
                 </View>
 
@@ -467,7 +485,8 @@ export default function StudentHome() {
                 value={newCode}
                 onChangeText={(txt) => {
                   setNewCode(txt.toUpperCase());
-                  if (formError.code) setFormError((e) => ({ ...e, code: undefined }));
+                  if (formError.code)
+                    setFormError((e) => ({ ...e, code: undefined }));
                 }}
                 placeholder="e.g. IT3010"
                 icon="book-outline"
@@ -480,7 +499,8 @@ export default function StudentHome() {
                 value={newName}
                 onChangeText={(txt) => {
                   setNewName(txt);
-                  if (formError.name) setFormError((e) => ({ ...e, name: undefined }));
+                  if (formError.name)
+                    setFormError((e) => ({ ...e, name: undefined }));
                 }}
                 placeholder="e.g. Data Structures"
                 icon="document-text-outline"
@@ -495,8 +515,8 @@ export default function StudentHome() {
                     title="Cancel"
                     onPress={() => {
                       setModalVisible(false);
-                      setNewCode('');
-                      setNewName('');
+                      setNewCode("");
+                      setNewName("");
                       setFormError({});
                     }}
                     variant="outline"
@@ -532,14 +552,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 20,
   },
   greetingText: {
     fontSize: 24,
-    fontWeight: '700',
+    fontWeight: "700",
     color: colors.text,
   },
   subGreetingText: {
@@ -550,14 +570,14 @@ const styles = StyleSheet.create({
   avatarTouchable: {
     minHeight: 48,
     minWidth: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   heroCard: {
     backgroundColor: colors.card,
     borderRadius: 16,
     padding: 18,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 6,
@@ -566,14 +586,14 @@ const styles = StyleSheet.create({
   },
   heroHeading: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: "700",
     color: colors.text,
-    textAlign: 'center',
+    textAlign: "center",
     marginBottom: 16,
   },
   searchBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: colors.background,
     borderRadius: 12,
     paddingHorizontal: 12,
@@ -589,7 +609,7 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   chipsRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 8,
   },
   chip: {
@@ -597,20 +617,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 20,
     minHeight: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   chipSelected: {
     backgroundColor: colors.primary,
   },
   chipOutline: {
-    backgroundColor: 'transparent',
+    backgroundColor: "transparent",
     borderWidth: 1,
     borderColor: colors.borderDark,
   },
   chipText: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   chipTextSelected: {
     color: colors.card,
@@ -619,29 +639,29 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 10,
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: '700',
+    fontWeight: "700",
     color: colors.text,
   },
   seeAllTouchable: {
     minHeight: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   seeAllText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
     color: colors.primary,
   },
   addButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
     backgroundColor: colors.lightGreen,
     paddingHorizontal: 12,
@@ -651,12 +671,12 @@ const styles = StyleSheet.create({
   },
   addButtonText: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: "600",
     color: colors.primary,
   },
   modulesLoading: {
     paddingVertical: 14,
-    alignItems: 'center',
+    alignItems: "center",
   },
   moduleErrorText: {
     fontSize: 13,
@@ -664,8 +684,8 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   emptyModulesCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
     backgroundColor: colors.card,
     borderRadius: 14,
@@ -679,14 +699,14 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   savedModulesRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 10,
     paddingVertical: 4,
     marginBottom: 14,
   },
   savedModuleChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: colors.card,
     borderWidth: 1,
     borderColor: colors.border,
@@ -695,20 +715,20 @@ const styles = StyleSheet.create({
     paddingLeft: 14,
     paddingRight: 10,
     minHeight: 48,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.03,
     shadowRadius: 2,
     elevation: 1,
   },
   savedModuleContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: '100%',
+    flexDirection: "row",
+    alignItems: "center",
+    height: "100%",
   },
   savedModuleCode: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: "700",
     color: colors.primary,
   },
   savedModuleDot: {
@@ -725,19 +745,19 @@ const styles = StyleSheet.create({
     padding: 6,
     minWidth: 32,
     minHeight: 32,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   centerContainer: {
     paddingVertical: 32,
-    alignItems: 'center',
+    alignItems: "center",
   },
   stateCard: {
     backgroundColor: colors.card,
     borderRadius: 14,
     padding: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     marginBottom: 20,
   },
   emptyText: {
@@ -749,7 +769,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.error,
     marginTop: 8,
-    textAlign: 'center',
+    textAlign: "center",
   },
   retryButtonWrapper: {
     marginTop: 12,
@@ -760,13 +780,13 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   tutorCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: colors.card,
     borderRadius: 14,
     padding: 14,
     minHeight: 64,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 4,
@@ -782,23 +802,23 @@ const styles = StyleSheet.create({
   },
   tutorName: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: "600",
     color: colors.text,
   },
   ratingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 4,
     marginTop: 2,
   },
   ratingText: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: "600",
     color: colors.text,
   },
   ratingCount: {
     color: colors.mutedText,
-    fontWeight: '400',
+    fontWeight: "400",
   },
   moduleText: {
     fontSize: 13,
@@ -806,16 +826,16 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   badgeWrapper: {
-    alignSelf: 'center',
+    alignSelf: "center",
   },
   bookingPlaceholderCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: colors.card,
     borderRadius: 14,
     padding: 18,
     minHeight: 56,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
     shadowRadius: 4,
@@ -832,14 +852,14 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: colors.overlay,
-    justifyContent: 'center',
+    justifyContent: "center",
     paddingHorizontal: 24,
   },
   modalContent: {
     backgroundColor: colors.card,
     borderRadius: 18,
     padding: 22,
-    shadowColor: '#000',
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 10,
@@ -847,19 +867,19 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: '700',
+    fontWeight: "700",
     color: colors.text,
     marginBottom: 16,
-    textAlign: 'center',
+    textAlign: "center",
   },
   generalErrorText: {
     fontSize: 13,
     color: colors.error,
-    textAlign: 'center',
+    textAlign: "center",
     marginBottom: 12,
   },
   modalActions: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
     marginTop: 8,
   },
