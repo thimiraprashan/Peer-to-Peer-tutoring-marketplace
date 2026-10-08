@@ -1,5 +1,14 @@
+import { auth, db } from "@/firebase";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter, type Href } from "expo-router";
+import {
+  collection,
+  doc,
+  getDocs,
+  query,
+  updateDoc,
+  where,
+} from "firebase/firestore";
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
@@ -13,8 +22,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { auth, db } from "../../../firebase";
-import { doc, updateDoc } from "firebase/firestore";
 import { getTutorBookings } from "../../../services/bookingService";
 import {
   createNotification,
@@ -63,15 +70,57 @@ export default function TutorRequests() {
   const [refreshing, setRefreshing] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
 
-  // Reschedule modal state
+  // 🆕 Conflict tracking
+  const [conflicts, setConflicts] = useState<Record<string, boolean>>({});
+
   const [rescheduleBooking, setRescheduleBooking] = useState<Booking | null>(
-    null
+    null,
   );
   const [newDate, setNewDate] = useState("");
   const [newStart, setNewStart] = useState("");
   const [newEnd, setNewEnd] = useState("");
 
-  // ---------- Load pending bookings ----------
+  // 🆕 Check for time conflicts with approved bookings
+  const checkConflicts = async (pendingBookings: Booking[]) => {
+    if (!uid || pendingBookings.length === 0) {
+      setConflicts({});
+      return;
+    }
+
+    try {
+      console.log("🔍 Checking conflicts for UID:", uid);
+      console.log("🔍 Pending bookings:", pendingBookings.length);
+
+      const q = query(
+        collection(db, "bookings"),
+        where("tutorId", "==", uid),
+        where("status", "==", "approved"),
+      );
+      const snapshot = await getDocs(q);
+      console.log("🔍 Approved bookings found:", snapshot.docs.length);
+
+      const approvedBookings = snapshot.docs.map((d) => ({
+        id: d.id,
+        ...d.data(),
+      })) as Booking[];
+
+      const conflictMap: Record<string, boolean> = {};
+      pendingBookings.forEach((pending) => {
+        const hasConflict = approvedBookings.some(
+          (approved) =>
+            approved.date === pending.date &&
+            approved.startTime === pending.startTime,
+        );
+        conflictMap[pending.id] = hasConflict;
+      });
+
+      console.log("🔍 Conflicts found:", conflictMap);
+      setConflicts(conflictMap);
+    } catch (error: any) {
+      console.log("❌ Conflict check error:", error?.message || error);
+    }
+  };
+
   const loadData = async () => {
     if (!uid) {
       setLoading(false);
@@ -80,9 +129,12 @@ export default function TutorRequests() {
     try {
       const data = await getTutorBookings(uid);
       const pendingOnly = (data as Booking[]).filter(
-        (b) => b.status === "pending"
+        (b) => b.status === "pending",
       );
       setBookings(pendingOnly);
+
+      // 🆕 Check conflicts after loading
+      checkConflicts(pendingOnly);
     } catch (error: any) {
       console.log("Requests load error:", error?.message || error);
     } finally {
@@ -94,7 +146,7 @@ export default function TutorRequests() {
   useFocusEffect(
     useCallback(() => {
       loadData();
-    }, [uid])
+    }, [uid]),
   );
 
   const onRefresh = () => {
@@ -104,6 +156,30 @@ export default function TutorRequests() {
 
   // ---------- Approve ----------
   const handleApprove = async (booking: Booking) => {
+    if (!uid) return;
+
+    // 🆕 Warn if there's a conflict
+    if (conflicts[booking.id]) {
+      Alert.alert(
+        "⚠️ Time Conflict",
+        `You already have an approved booking at ${booking.date} ${booking.startTime}.\n\nApprove anyway?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Approve Anyway",
+            style: "destructive",
+            onPress: () => proceedApprove(booking),
+          },
+        ],
+      );
+      return;
+    }
+
+    proceedApprove(booking);
+  };
+
+  // 🆕 Extracted approve logic
+  const proceedApprove = async (booking: Booking) => {
     if (!uid) return;
     Alert.alert(
       "Approve Request",
@@ -115,19 +191,15 @@ export default function TutorRequests() {
           onPress: async () => {
             setProcessingId(booking.id);
             try {
-              // 1. Update status
               await updateBookingStatus(booking.id, "approved");
-
-              // 2. Notify student (cross-member agreement)
               if (booking.studentId) {
                 await createNotification(
                   booking.studentId,
                   "booking_approved",
                   `Your booking for ${booking.subjectCode} on ${booking.date} at ${booking.startTime} has been approved.`,
-                  booking.id
+                  booking.id,
                 );
               }
-
               Alert.alert("✅ Approved", "Booking confirmed.");
               loadData();
             } catch (error: any) {
@@ -137,7 +209,7 @@ export default function TutorRequests() {
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -146,7 +218,7 @@ export default function TutorRequests() {
     if (!uid) return;
     Alert.alert(
       "Reject Request",
-      `Reject this booking request? The slot will be freed for other students.`,
+      "Reject this booking request? The slot will be freed.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -155,10 +227,7 @@ export default function TutorRequests() {
           onPress: async () => {
             setProcessingId(booking.id);
             try {
-              // 1. Update status to cancelled
               await updateBookingStatus(booking.id, "cancelled");
-
-              // 2. Free up the slot (cross-member agreement)
               if (booking.slotId) {
                 try {
                   await updateDoc(doc(db, "availability", booking.slotId), {
@@ -168,17 +237,14 @@ export default function TutorRequests() {
                   console.log("Slot free error:", e);
                 }
               }
-
-              // 3. Notify student
               if (booking.studentId) {
                 await createNotification(
                   booking.studentId,
                   "booking_rejected",
                   `Your booking for ${booking.subjectCode} was declined.`,
-                  booking.id
+                  booking.id,
                 );
               }
-
               Alert.alert("Rejected", "The student has been notified.");
               loadData();
             } catch (error: any) {
@@ -188,7 +254,7 @@ export default function TutorRequests() {
             }
           },
         },
-      ]
+      ],
     );
   };
 
@@ -207,8 +273,6 @@ export default function TutorRequests() {
       Alert.alert("Missing Info", "Please fill in all fields.");
       return;
     }
-
-    // Validate format
     if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate)) {
       Alert.alert("Invalid Date", "Use format: YYYY-MM-DD");
       return;
@@ -220,29 +284,24 @@ export default function TutorRequests() {
 
     setProcessingId(rescheduleBooking.id);
     try {
-      // 1. Update booking with reschedule proposal
       await proposeReschedule(rescheduleBooking.id, {
         date: newDate,
         startTime: newStart,
         endTime: newEnd,
       });
-
-      // 2. Notify student
       if (rescheduleBooking.studentId) {
         await createNotification(
           rescheduleBooking.studentId,
           "reschedule",
           `New time proposed: ${newDate} at ${newStart} - ${newEnd}. Please review.`,
-          rescheduleBooking.id
+          rescheduleBooking.id,
         );
       }
-
-      // 👇 UI03 fix — clear success message
       setRescheduleBooking(null);
       Alert.alert(
         "✅ Reschedule Proposed",
         `New time: ${newDate} at ${newStart}\n\nStatus: Waiting for student confirmation.\nThe student has been notified.`,
-        [{ text: "OK", onPress: loadData }]
+        [{ text: "OK", onPress: loadData }],
       );
     } catch (error: any) {
       Alert.alert("Error", error?.message || "Could not reschedule.");
@@ -261,7 +320,6 @@ export default function TutorRequests() {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
           <Text style={styles.headerTitle}>Pending Requests</Text>
@@ -289,8 +347,31 @@ export default function TutorRequests() {
           </View>
         ) : (
           bookings.map((item) => (
-            <View key={item.id} style={styles.card}>
-              {/* Student info */}
+            <TouchableOpacity
+              key={item.id}
+              style={styles.card}
+              activeOpacity={0.85}
+              onPress={() =>
+                router.push({
+                  pathname: "/(tutor)/RequestDetails",
+                  params: { bookingId: item.id },
+                } as Href)
+              }
+            >
+              {/* 🆕 Conflict Warning Banner */}
+              {conflicts[item.id] && (
+                <View style={styles.conflictBanner}>
+                  <Ionicons
+                    name="warning-outline"
+                    size={18}
+                    color={GREEN_THEME.danger}
+                  />
+                  <Text style={styles.conflictText}>
+                    You already have an approved booking at this time
+                  </Text>
+                </View>
+              )}
+
               <View style={styles.cardHeader}>
                 <View style={styles.avatar}>
                   <Text style={styles.avatarText}>
@@ -310,7 +391,6 @@ export default function TutorRequests() {
                 </View>
               </View>
 
-              {/* Date/Time/Mode */}
               <View style={styles.detailsRow}>
                 <View style={styles.detailItem}>
                   <Ionicons
@@ -340,13 +420,12 @@ export default function TutorRequests() {
                     {item.mode === "online"
                       ? "Online"
                       : item.mode === "face"
-                      ? "Face"
-                      : "Both"}
+                        ? "Face"
+                        : "Both"}
                   </Text>
                 </View>
               </View>
 
-              {/* Optional note */}
               {item.note ? (
                 <View style={styles.noteBox}>
                   <Ionicons
@@ -358,15 +437,20 @@ export default function TutorRequests() {
                 </View>
               ) : null}
 
-              {/* Actions */}
               <View style={styles.actionsRow}>
                 <TouchableOpacity
                   style={[styles.btn, styles.rejectBtn]}
-                  onPress={() => handleReject(item)}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    handleReject(item);
+                  }}
                   disabled={processingId === item.id}
                 >
                   {processingId === item.id ? (
-                    <ActivityIndicator size="small" color={GREEN_THEME.danger} />
+                    <ActivityIndicator
+                      size="small"
+                      color={GREEN_THEME.danger}
+                    />
                   ) : (
                     <>
                       <Ionicons
@@ -381,7 +465,10 @@ export default function TutorRequests() {
 
                 <TouchableOpacity
                   style={[styles.btn, styles.rescheduleBtn]}
-                  onPress={() => openRescheduleModal(item)}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    openRescheduleModal(item);
+                  }}
                   disabled={processingId === item.id}
                 >
                   <Ionicons
@@ -394,7 +481,10 @@ export default function TutorRequests() {
 
                 <TouchableOpacity
                   style={[styles.btn, styles.approveBtn]}
-                  onPress={() => handleApprove(item)}
+                  onPress={(e) => {
+                    e.stopPropagation();
+                    handleApprove(item);
+                  }}
                   disabled={processingId === item.id}
                 >
                   {processingId === item.id ? (
@@ -407,7 +497,7 @@ export default function TutorRequests() {
                   )}
                 </TouchableOpacity>
               </View>
-            </View>
+            </TouchableOpacity>
           ))
         )}
       </ScrollView>
@@ -423,7 +513,8 @@ export default function TutorRequests() {
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>Propose New Time</Text>
             <Text style={styles.modalSub}>
-              {rescheduleBooking?.studentName} • {rescheduleBooking?.subjectCode}
+              {rescheduleBooking?.studentName} •{" "}
+              {rescheduleBooking?.subjectCode}
             </Text>
 
             <Text style={styles.modalLabel}>Date (YYYY-MM-DD)</Text>
@@ -514,6 +605,24 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: GREEN_THEME.borderLight,
   },
+  // 🆕 Conflict warning styles
+  conflictBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFEBEE",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+    gap: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: GREEN_THEME.danger,
+  },
+  conflictText: {
+    flex: 1,
+    fontSize: 12,
+    color: GREEN_THEME.danger,
+    fontWeight: "600",
+  },
   cardHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -582,15 +691,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     gap: 4,
   },
-  rejectBtn: {
-    backgroundColor: GREEN_THEME.dangerLight,
-  },
-  rescheduleBtn: {
-    backgroundColor: "#E8F0FE",
-  },
-  approveBtn: {
-    backgroundColor: GREEN_THEME.primaryGreen,
-  },
+  rejectBtn: { backgroundColor: GREEN_THEME.dangerLight },
+  rescheduleBtn: { backgroundColor: "#E8F0FE" },
+  approveBtn: { backgroundColor: GREEN_THEME.primaryGreen },
   rejectText: { color: GREEN_THEME.danger, fontWeight: "700", fontSize: 12 },
   rescheduleText: {
     color: GREEN_THEME.infoText,
@@ -598,8 +701,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   approveText: { color: "#fff", fontWeight: "700", fontSize: 12 },
-
-  // Empty
   emptyBox: { alignItems: "center", paddingVertical: 60 },
   emptyTitle: {
     fontSize: 17,
@@ -612,8 +713,6 @@ const styles = StyleSheet.create({
     color: GREEN_THEME.textGray,
     marginTop: 4,
   },
-
-  // Modal
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.5)",
