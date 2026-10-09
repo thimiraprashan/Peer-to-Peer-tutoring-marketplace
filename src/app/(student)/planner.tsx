@@ -73,9 +73,9 @@ const TASK_PRIORITIES: Array<{
   label: string;
   color: string;
 }> = [
-  { id: 'low', label: 'Low', color: '#10B981' },
-  { id: 'medium', label: 'Medium', color: '#F59E0B' },
-  { id: 'high', label: 'High', color: '#EF4444' },
+  { id: 'low', label: 'Low', color: colors.priorityLow },
+  { id: 'medium', label: 'Medium', color: colors.priorityMedium },
+  { id: 'high', label: 'High', color: colors.priorityHigh },
 ];
 
 export default function StudyPlannerScreen() {
@@ -300,10 +300,8 @@ export default function StudyPlannerScreen() {
 
       if (editingTaskId) {
         await updateStudyTask(editingTaskId, taskPayload);
-        console.log('Updated study task:', editingTaskId, taskPayload);
       } else {
         const created = await addStudyTask(user.uid, taskPayload);
-        console.log('Created study task:', created);
       }
 
       await loadTasks();
@@ -606,7 +604,7 @@ export default function StudyPlannerScreen() {
                         {/* Round Checkbox */}
                         <Pressable
                           onPress={() => handleToggleStatus(task)}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                           accessibilityRole="checkbox"
                           accessibilityLabel={`Mark as ${isDone ? 'todo' : 'done'}`}
                           style={[
@@ -622,7 +620,7 @@ export default function StudyPlannerScreen() {
                         {/* Edit Pencil Button */}
                         <Pressable
                           onPress={() => handleOpenEditModal(task)}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                           accessibilityRole="button"
                           accessibilityLabel="Edit task"
                           style={styles.cardActionButton}
@@ -637,7 +635,7 @@ export default function StudyPlannerScreen() {
                         {/* Delete Trash Button */}
                         <Pressable
                           onPress={() => handleDeleteTask(task)}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                           accessibilityRole="button"
                           accessibilityLabel="Delete deadline"
                           style={styles.cardActionButton}
@@ -788,7 +786,7 @@ export default function StudyPlannerScreen() {
         onRequestClose={handleCloseModal}
       >
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.modalOverlay}
         >
           <Pressable
@@ -818,7 +816,7 @@ export default function StudyPlannerScreen() {
               </View>
               <Pressable
                 onPress={handleCloseModal}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                 accessibilityRole="button"
                 accessibilityLabel="Close dialog"
                 style={styles.modalCloseButton}
@@ -1154,7 +1152,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     borderWidth: 1,
     borderColor: colors.border,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 6,
@@ -1211,7 +1209,7 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   filterChipTextActive: {
-    color: '#FFFFFF',
+    color: colors.white,
   },
   // Empty State
   emptyContainer: {
@@ -1252,15 +1250,15 @@ const styles = StyleSheet.create({
     padding: 16,
     borderWidth: 1,
     borderColor: colors.border,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.04,
     shadowRadius: 5,
     elevation: 2,
   },
   taskCardDone: {
-    backgroundColor: '#FAFDF9',
-    borderColor: '#E5EDE5',
+    backgroundColor: colors.taskDoneBg,
+    borderColor: colors.taskDoneBorder,
     opacity: 0.75,
   },
   cardHeader: {
@@ -1353,7 +1351,7 @@ const styles = StyleSheet.create({
   },
   taskNotesDone: {
     textDecorationLine: 'line-through',
-    color: '#9CA3AF',
+    color: colors.taskDoneNotes,
   },
   // Find a tutor outline button
   findTutorButton: {
@@ -1408,13 +1406,13 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   countdownBadgeOverdue: {
-    backgroundColor: '#FEE2E2',
+    backgroundColor: colors.badgeOverdueBg,
   },
   countdownBadgeUrgent: {
-    backgroundColor: '#FEF3C7',
+    backgroundColor: colors.badgeUrgentBg,
   },
   countdownBadgeDone: {
-    backgroundColor: '#F3F4F6',
+    backgroundColor: colors.badgeDoneBg,
   },
   countdownText: {
     fontSize: 12,
@@ -1425,7 +1423,7 @@ const styles = StyleSheet.create({
     color: colors.error,
   },
   countdownTextUrgent: {
-    color: '#B45309',
+    color: colors.badgeUrgentText,
   },
   countdownTextDone: {
     color: colors.mutedText,
@@ -1440,7 +1438,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 8,
@@ -1465,7 +1463,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
     maxHeight: '90%',
     paddingTop: 8,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.12,
     shadowRadius: 12,
@@ -1564,7 +1562,7 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   typeChipTextSelected: {
-    color: '#FFFFFF',
+    color: colors.white,
   },
   dateTrigger: {
     flexDirection: 'row',
@@ -1613,7 +1611,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   iosPickerDoneText: {
-    color: '#FFFFFF',
+    color: colors.white,
     fontWeight: '600',
     fontSize: 14,
   },
