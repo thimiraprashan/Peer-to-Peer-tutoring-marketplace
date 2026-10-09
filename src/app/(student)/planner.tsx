@@ -160,6 +160,53 @@ export default function StudyPlannerScreen() {
     loadTasks();
   }, [loadTasks]);
 
+  // Round checkbox status toggle (optimistic update; revert with an Alert on failure)
+  const handleToggleStatus = async (task: StudyTask) => {
+    const previousStatus = task.status;
+    const nextStatus = previousStatus === 'done' ? 'todo' : 'done';
+
+    // 1. Optimistic update
+    setTasks((prev) =>
+      prev.map((t) => (t.id === task.id ? { ...t, status: nextStatus } : t))
+    );
+
+    try {
+      await setTaskStatus(task.id, nextStatus);
+    } catch {
+      // 2. Revert with an Alert on failure
+      setTasks((prev) =>
+        prev.map((t) => (t.id === task.id ? { ...t, status: previousStatus } : t))
+      );
+      Alert.alert(
+        'Update Failed',
+        'Failed to update status. Please try again.'
+      );
+    }
+  };
+
+  // Delete task handler (asks "Delete this deadline?" with an Alert, then calls deleteStudyTask and reloads)
+  const handleDeleteTask = (task: StudyTask) => {
+    Alert.alert(
+      'Delete Deadline',
+      'Delete this deadline?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await deleteStudyTask(task.id);
+              await loadTasks();
+            } catch {
+              Alert.alert('Error', 'Failed to delete task. Please try again.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
   // Open Modal Empty (Add)
   const handleOpenAddModal = () => {
     setEditingTaskId(null);
@@ -289,45 +336,7 @@ export default function StudyPlannerScreen() {
     }
   };
 
-  // Status toggle handler
-  const handleToggleStatus = async (task: StudyTask) => {
-    const nextStatus = task.status === 'done' ? 'todo' : 'done';
-    try {
-      setTasks((prev) =>
-        prev.map((t) => (t.id === task.id ? { ...t, status: nextStatus } : t))
-      );
-      await setTaskStatus(task.id, nextStatus);
-    } catch {
-      Alert.alert('Error', 'Failed to update task status. Please try again.');
-      loadTasks();
-    }
-  };
-
-  // Delete task handler
-  const handleDeleteTask = (task: StudyTask) => {
-    Alert.alert(
-      'Delete Task',
-      `Are you sure you want to delete "${task.title}"?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setTasks((prev) => prev.filter((t) => t.id !== task.id));
-              await deleteStudyTask(task.id);
-            } catch {
-              Alert.alert('Error', 'Failed to delete task. Please try again.');
-              loadTasks();
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  // Summary counts
+  // Summary counts (refreshed automatically after every change to tasks)
   const summaryCounts = useMemo(() => {
     let dueIn7Days = 0;
     let overdue = 0;
@@ -460,7 +469,7 @@ export default function StudyPlannerScreen() {
             />
           }
         >
-          {/* 2. Summary Strip (3 counts) */}
+          {/* 2. Summary Strip (3 counts refreshed after every change) */}
           <View style={styles.summaryCard}>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryCount}>
@@ -592,16 +601,17 @@ export default function StudyPlannerScreen() {
                         </View>
                       </View>
 
-                      {/* Right Header: Toggle Done Button, Edit Pencil, Delete */}
+                      {/* Right Header: Round Checkbox, Edit Pencil, Delete */}
                       <View style={styles.cardHeaderRight}>
+                        {/* Round Checkbox */}
                         <Pressable
                           onPress={() => handleToggleStatus(task)}
                           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                           accessibilityRole="checkbox"
                           accessibilityLabel={`Mark as ${isDone ? 'todo' : 'done'}`}
                           style={[
-                            styles.checkbox,
-                            isDone && styles.checkboxDone,
+                            styles.roundCheckbox,
+                            isDone && styles.roundCheckboxDone,
                           ]}
                         >
                           {isDone ? (
@@ -624,24 +634,24 @@ export default function StudyPlannerScreen() {
                           />
                         </Pressable>
 
-                        {/* Delete Button */}
+                        {/* Delete Trash Button */}
                         <Pressable
                           onPress={() => handleDeleteTask(task)}
                           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                           accessibilityRole="button"
-                          accessibilityLabel="Delete task"
+                          accessibilityLabel="Delete deadline"
                           style={styles.cardActionButton}
                         >
                           <Ionicons
                             name="trash-outline"
-                            size={16}
+                            size={17}
                             color={colors.mutedText}
                           />
                         </Pressable>
                       </View>
                     </View>
 
-                    {/* Task Title */}
+                    {/* Task Title (Strikethrough and muted when done) */}
                     <Text
                       style={[
                         styles.taskTitle,
@@ -665,6 +675,34 @@ export default function StudyPlannerScreen() {
                       </Text>
                     ) : null}
 
+                    {/* "Find a tutor" outline button on exam and assignment cards that are not done */}
+                    {!isDone &&
+                      (task.type === 'exam' || task.type === 'assignment') && (
+                        <Pressable
+                          onPress={() =>
+                            router.push({
+                              pathname: '/(student)/search',
+                              params: { q: task.moduleCode },
+                            } as any)
+                          }
+                          style={({ pressed }) => [
+                            styles.findTutorButton,
+                            pressed && styles.findTutorButtonPressed,
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Find a tutor for ${task.moduleCode}`}
+                        >
+                          <Ionicons
+                            name="search-outline"
+                            size={14}
+                            color={colors.primary}
+                          />
+                          <Text style={styles.findTutorButtonText}>
+                            Find a tutor
+                          </Text>
+                        </Pressable>
+                      )}
+
                     {/* Footer Row: Formatted Due Date + Countdown */}
                     <View style={styles.cardFooter}>
                       <View style={styles.dateRow}>
@@ -678,7 +716,7 @@ export default function StudyPlannerScreen() {
                         </Text>
                       </View>
 
-                      {/* Countdown badge: Red when overdue, amber within 3 days */}
+                      {/* Countdown badge: Red when overdue, amber within 3 days, muted when completed */}
                       <View
                         style={[
                           styles.countdownBadge,
@@ -1223,7 +1261,7 @@ const styles = StyleSheet.create({
   taskCardDone: {
     backgroundColor: '#FAFDF9',
     borderColor: '#E5EDE5',
-    opacity: 0.85,
+    opacity: 0.75,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -1281,17 +1319,18 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: colors.primary,
   },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
+  // Round Checkbox
+  roundCheckbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     borderWidth: 2,
     borderColor: colors.borderDark,
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: colors.card,
   },
-  checkboxDone: {
+  roundCheckboxDone: {
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
@@ -1310,10 +1349,35 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.mutedText,
     lineHeight: 18,
-    marginBottom: 10,
+    marginBottom: 6,
   },
   taskNotesDone: {
     textDecorationLine: 'line-through',
+    color: '#9CA3AF',
+  },
+  // Find a tutor outline button
+  findTutorButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: colors.primary,
+    backgroundColor: 'transparent',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  findTutorButtonPressed: {
+    backgroundColor: colors.lightGreen,
+    opacity: 0.85,
+  },
+  findTutorButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.primary,
   },
   cardFooter: {
     flexDirection: 'row',
