@@ -69,6 +69,12 @@ export default function StudentLayout() {
           ),
         }}
       />
+      <Tabs.Screen
+        name="planner"
+        options={{
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }
