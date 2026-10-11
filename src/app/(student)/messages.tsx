@@ -4,7 +4,10 @@
  * Tapping a conversation navigates to the Chat Detail screen.
  * The "+" FAB opens a New Conversation modal to start a chat with any user.
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -12,19 +15,14 @@ import {
   Modal,
   Pressable,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  View,
+  View
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { colors } from '../../theme/colors';
-import { Avatar } from '../../components/ui/Avatar';
 import { ConversationItem } from '../../components/chat/ConversationItem';
+import { Avatar } from '../../components/ui/Avatar';
 import { useCurrentUser } from '../../hooks/useCurrentUser';
 import {
   Conversation,
@@ -32,6 +30,7 @@ import {
   getOrCreateConversation,
   subscribeToConversations,
 } from '../../services/chatService';
+import { colors } from '../../theme/colors';
 
 export default function MessagesScreen() {
   const router = useRouter();
@@ -89,13 +88,20 @@ export default function MessagesScreen() {
 
   // Open the user selector modal
   const openNewConversation = async () => {
+    if (!user?.uid) {
+      Alert.alert('Error', 'User not authenticated. Please try again.');
+      return;
+    }
+    
     setNewConvModalVisible(true);
     setSearchQuery('');
     setUsersLoading(true);
+    setAllUsers([]);
+    
     try {
-      const users = await fetchAllUsers(user!.uid);
+      const users = await fetchAllUsers(user.uid);
       setAllUsers(users);
-    } catch {
+    } catch (error) {
       Alert.alert('Error', 'Could not load users. Please try again.');
     } finally {
       setUsersLoading(false);
@@ -127,16 +133,19 @@ export default function MessagesScreen() {
   // Get display name of the other participant
   const getOtherParticipant = (conv: Conversation) => {
     if (!user?.uid) return { uid: '', name: 'Unknown' };
-    const otherId = conv.participants.find((p) => p !== user.uid) || '';
+    const participantList = conv.participantIds || conv.participants || [];
+    const otherId = participantList.find((p) => p !== user.uid) || '';
     const name = conv.participantNames?.[otherId] || 'Unknown User';
     return { uid: otherId, name };
   };
 
-  const filteredUsers = allUsers.filter(
-    (u) =>
-      u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.email.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filter users with trimmed, case-insensitive search
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+  const filteredUsers = allUsers.filter((u) => {
+    const nameMatch = (u.name || '').toLowerCase().includes(trimmedQuery);
+    const emailMatch = (u.email || '').toLowerCase().includes(trimmedQuery);
+    return nameMatch || emailMatch;
+  });
 
   const renderConversation = ({ item }: { item: Conversation }) => {
     const other = getOtherParticipant(item);
@@ -146,7 +155,7 @@ export default function MessagesScreen() {
       <ConversationItem
         otherName={other.name}
         lastMessage={item.lastMessage}
-        lastMessageTime={item.lastMessageTime}
+        lastMessageTime={(item.lastMessageAt || item.lastMessageTime) ?? null}
         unreadCount={myUnread}
         onPress={() => router.push(`/chat/${item.id}` as any)}
       />
@@ -283,42 +292,34 @@ export default function MessagesScreen() {
                 </Text>
               </View>
             ) : (
-              <ScrollView
-                style={styles.userList}
-                showsVerticalScrollIndicator={false}
-              >
-                {filteredUsers.map((u) => (
-                  <Pressable
-                    key={u.uid}
-                    style={({ pressed }) => [
-                      styles.userRow,
-                      pressed && styles.userRowPressed,
-                      creatingConv && styles.userRowDisabled,
-                    ]}
-                    onPress={() => !creatingConv && startConversation(u)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Start conversation with ${u.name}`}
-                  >
-                    <Avatar name={u.name} size={42} />
-                    <View style={styles.userInfo}>
-                      <Text style={styles.userName}>{u.name}</Text>
-                      <Text style={styles.userRole}>
-                        {u.role.charAt(0).toUpperCase() + u.role.slice(1)} ·{' '}
-                        {u.email}
-                      </Text>
-                    </View>
-                    {creatingConv ? (
-                      <ActivityIndicator size="small" color={colors.primary} />
-                    ) : (
-                      <Ionicons
-                        name="chatbubble-outline"
-                        size={18}
-                        color={colors.primary}
-                      />
-                    )}
-                  </Pressable>
-                ))}
-              </ScrollView>
+              <View style={styles.userList}>
+  {filteredUsers.map((u) => (
+    <Pressable
+      key={u.uid}
+      style={({ pressed }) => [
+        styles.userRow,
+        pressed && styles.userRowPressed,
+        creatingConv && styles.userRowDisabled,
+      ]}
+      onPress={() => !creatingConv && startConversation(u)}
+    >
+      <Avatar name={u.name} size={42} />
+
+      <View style={styles.userInfo}>
+        <Text style={styles.userName}>{u.name}</Text>
+        <Text style={styles.userRole}>
+          {u.role.charAt(0).toUpperCase() + u.role.slice(1)} · {u.email}
+        </Text>
+      </View>
+
+      <Ionicons
+        name="chatbubble-outline"
+        size={18}
+        color={colors.primary}
+      />
+    </Pressable>
+  ))}
+</View>
             )}
           </Pressable>
         </Pressable>
@@ -477,7 +478,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   userList: {
-    flex: 1,
+    maxHeight: 400,
+  },
+  userListContent: {
+    paddingBottom: 16,
   },
   userRow: {
     flexDirection: 'row',
