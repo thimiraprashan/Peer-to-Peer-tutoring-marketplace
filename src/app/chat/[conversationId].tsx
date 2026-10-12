@@ -45,6 +45,8 @@ import {
   subscribeToMessages,
 } from '../../services/chatService';
 import { createReport, ReportSeverity, ReportType } from '../../services/reportsService';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../firebase';
 import { colors } from '../../theme/colors';
 
 export default function ChatDetailScreen() {
@@ -110,14 +112,50 @@ export default function ChatDetailScreen() {
   }, [conversationId]);
 
   // ─── Derived: other participant name ─────────────────────────────────────
+  const [resolvedOtherName, setResolvedOtherName] = useState<string>('');
+
+  useEffect(() => {
+    if (!conversation || !user?.uid) return;
+    const participantList = conversation.participantIds || conversation.participants || [];
+    const otherId = participantList.find((p: string) => p !== user.uid);
+    if (!otherId) return;
+
+    if (
+      conversation.participantNames?.[otherId] &&
+      conversation.participantNames[otherId] !== 'Unknown User'
+    ) {
+      setResolvedOtherName(conversation.participantNames[otherId]);
+      return;
+    }
+
+    getDoc(doc(db, 'users', otherId))
+      .then((userSnap) => {
+        if (userSnap.exists()) {
+          const uData = userSnap.data();
+          const name = uData.name || uData.displayName || '';
+          if (name) {
+            setResolvedOtherName(name);
+            return;
+          }
+        }
+        return getDoc(doc(db, 'tutors', otherId)).then((tutorSnap) => {
+          if (tutorSnap.exists()) {
+            const tData = tutorSnap.data();
+            const name = tData.name || '';
+            if (name) setResolvedOtherName(name);
+          }
+        });
+      })
+      .catch(() => {});
+  }, [conversation, user?.uid]);
+
   const otherParticipantName = React.useMemo(() => {
     if (!conversation || !user?.uid) return 'Chat';
     const participantList = conversation.participantIds || conversation.participants || [];
     const otherId = participantList.find((p: string) => p !== user.uid);
-    return otherId
-      ? conversation.participantNames?.[otherId] || 'Unknown User'
-      : 'Chat';
-  }, [conversation, user?.uid]);
+    if (!otherId) return 'Chat';
+    return conversation.participantNames?.[otherId] || resolvedOtherName || 'Chat';
+  }, [conversation, user?.uid, resolvedOtherName]);
 
   // ─── Send text ────────────────────────────────────────────────────────────
   const handleSendText = useCallback(async () => {

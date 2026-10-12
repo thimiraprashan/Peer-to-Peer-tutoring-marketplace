@@ -121,22 +121,31 @@ export async function getAdminDashboardStats(): Promise<AdminDashboardStats> {
     // 3. Fetch pending verifications
     try {
       const verifQuery = query(
-        collection(db, 'verifications'),
-        where('status', '==', 'pending')
+        collection(db, 'verificationRequests'),
+        where('status', 'in', ['submitted', 'pending'])
       );
       const verifSnap = await getDocs(verifQuery);
       pendingVerificationsCount = verifSnap.size;
     } catch {
-      // Fallback check on tutorVerifications
       try {
-        const altVerifQuery = query(
-          collection(db, 'tutorVerifications'),
-          where('status', '==', 'pending')
+        const altQuery = query(
+          collection(db, 'verificationRequests'),
+          where('status', '==', 'submitted')
         );
-        const altVerifSnap = await getDocs(altVerifQuery);
-        pendingVerificationsCount = altVerifSnap.size;
+        const altSnap = await getDocs(altQuery);
+        pendingVerificationsCount = altSnap.size;
       } catch {
-        // Ignore
+        // Fallback check on verifications
+        try {
+          const verifQuery = query(
+            collection(db, 'verifications'),
+            where('status', '==', 'pending')
+          );
+          const verifSnap = await getDocs(verifQuery);
+          pendingVerificationsCount = verifSnap.size;
+        } catch {
+          // Ignore
+        }
       }
     }
 

@@ -30,6 +30,8 @@ import {
   getOrCreateConversation,
   subscribeToConversations,
 } from '../../services/chatService';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../../firebase';
 import { colors } from '../../theme/colors';
 
 export default function MessagesScreen() {
@@ -51,6 +53,8 @@ export default function MessagesScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [creatingConv, setCreatingConv] = useState(false);
 
+  const [resolvedNames, setResolvedNames] = useState<Record<string, string>>({});
+
   const unsubRef = useRef<(() => void) | null>(null);
 
   // Subscribe to conversations in real time
@@ -67,6 +71,24 @@ export default function MessagesScreen() {
         setConversations(convs);
         setLoading(false);
         setRefreshing(false);
+
+        convs.forEach((conv) => {
+          const participantList = conv.participantIds || conv.participants || [];
+          const otherId = participantList.find((p) => p !== user.uid);
+          if (otherId && !conv.participantNames?.[otherId]) {
+            if (!resolvedNames[otherId]) {
+              getDoc(doc(db, 'users', otherId))
+                .then((snap) => {
+                  if (snap.exists()) {
+                    const data = snap.data();
+                    const name = data.name || data.displayName || 'Tutor';
+                    setResolvedNames((prev) => ({ ...prev, [otherId]: name }));
+                  }
+                })
+                .catch(() => {});
+            }
+          }
+        });
       },
       (err) => {
         setError('Failed to load conversations. Pull to retry.');
@@ -132,10 +154,13 @@ export default function MessagesScreen() {
 
   // Get display name of the other participant
   const getOtherParticipant = (conv: Conversation) => {
-    if (!user?.uid) return { uid: '', name: 'Unknown' };
+    if (!user?.uid) return { uid: '', name: 'Tutor' };
     const participantList = conv.participantIds || conv.participants || [];
     const otherId = participantList.find((p) => p !== user.uid) || '';
-    const name = conv.participantNames?.[otherId] || 'Unknown User';
+    const name =
+      conv.participantNames?.[otherId] ||
+      resolvedNames[otherId] ||
+      'Tutor';
     return { uid: otherId, name };
   };
 

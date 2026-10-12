@@ -28,6 +28,7 @@ import {
 } from "../../services/savedModuleService";
 import { fetchTutors } from "../../services/tutorService";
 import { getStudyTasks, daysUntil, formatCountdown } from "../../services/studyTaskService";
+import { getOrCreateConversation } from "../../services/chatService";
 import { colors } from "../../theme/colors";
 
 const FILTER_SUBJECTS = ["IT", "Business", "Engineering"];
@@ -658,6 +659,37 @@ export default function StudentHome() {
                     </View>
                   ) : null}
                   <Pressable
+                    onPress={async (e) => {
+                      e.stopPropagation();
+                      const targetTutorId = tutor.tutorId || tutor.id;
+                      if (!user?.uid) {
+                        Alert.alert("Sign In Required", "Please sign in to message this tutor.");
+                        return;
+                      }
+                      if (user.uid === targetTutorId) {
+                        Alert.alert("Notice", "You cannot chat with yourself.");
+                        return;
+                      }
+                      try {
+                        const convId = await getOrCreateConversation(
+                          user.uid,
+                          profile?.name || "Student",
+                          targetTutorId,
+                          tutor.name || "Tutor"
+                        );
+                        router.push(`/chat/${convId}` as any);
+                      } catch (err: any) {
+                        Alert.alert("Chat Error", err?.message || "Could not open chat with this tutor.");
+                      }
+                    }}
+                    style={styles.msgIconButton}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Message ${tutor.name}`}
+                  >
+                    <Ionicons name="chatbubble-ellipses-outline" size={18} color={colors.primary} />
+                  </Pressable>
+                  <Pressable
                     onPress={(e) => {
                       e.stopPropagation();
                       const id = tutor.tutorId || tutor.id;
@@ -1184,14 +1216,20 @@ const styles = StyleSheet.create({
     alignSelf: "center",
   },
   cardRightActions: {
-    alignItems: "flex-end",
-    justifyContent: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
     gap: 8,
   },
   favIconButton: {
     padding: 6,
     borderRadius: 16,
     backgroundColor: "#F3F4F6",
+  },
+  msgIconButton: {
+    padding: 6,
+    borderRadius: 16,
+    backgroundColor: colors.lightGreen,
   },
   bookingPlaceholderCard: {
     flexDirection: "row",

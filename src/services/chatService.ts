@@ -82,9 +82,7 @@ export function subscribeToConversations(
 ): () => void {
   const q = query(
     collection(db, 'conversations'),
-    where('participantIds', 'array-contains', userId),
-    orderBy('lastMessageAt', 'desc'),
-    limit(50)
+    where('participantIds', 'array-contains', userId)
   );
 
   return onSnapshot(
@@ -94,6 +92,18 @@ export function subscribeToConversations(
         id: d.id,
         ...(d.data() as Omit<Conversation, 'id'>),
       }));
+      // Sort client-side by lastMessageAt descending
+      convs.sort((a, b) => {
+        const timeA =
+          a.lastMessageAt?.toMillis?.() ??
+          a.lastMessageTime?.toMillis?.() ??
+          0;
+        const timeB =
+          b.lastMessageAt?.toMillis?.() ??
+          b.lastMessageTime?.toMillis?.() ??
+          0;
+        return timeB - timeA;
+      });
       onUpdate(convs);
     },
     (err) => {
@@ -127,14 +137,32 @@ export async function getOrCreateConversation(
       data.participantIds.length === 2 &&
       data.participantIds.includes(otherUserId)
     ) {
+      // If participantNames is missing or incomplete, patch it
+      if (
+        !data.participantNames ||
+        !data.participantNames[currentUserId] ||
+        !data.participantNames[otherUserId]
+      ) {
+        updateDoc(doc(db, 'conversations', d.id), {
+          participantNames: {
+            ...(data.participantNames || {}),
+            [currentUserId]: currentUserName || 'User',
+            [otherUserId]: otherUserName || 'User',
+          },
+        }).catch(() => {});
+      }
       return d.id;
     }
   }
 
-  // Create new conversation with required schema
+  // Create new conversation with required schema and participantNames
   const convRef = doc(collection(db, 'conversations'));
   await setDoc(convRef, {
     participantIds: [currentUserId, otherUserId],
+    participantNames: {
+      [currentUserId]: currentUserName || 'User',
+      [otherUserId]: otherUserName || 'User',
+    },
     lastMessage: '',
     lastMessageAt: serverTimestamp(),
   });
