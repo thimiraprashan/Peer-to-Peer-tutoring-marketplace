@@ -75,6 +75,12 @@ export default function StudentLayout() {
           href: null,
         }}
       />
+      <Tabs.Screen
+        name="tutor-profile"
+        options={{
+          href: null,
+        }}
+      />
     </Tabs>
   );
 }

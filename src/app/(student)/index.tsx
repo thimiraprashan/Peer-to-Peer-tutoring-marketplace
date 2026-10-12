@@ -430,7 +430,13 @@ export default function StudentHome() {
               <Pressable
                 key={tutor.tutorId}
                 onPress={() => {
-                  // TODO: Navigate to tutor profile screen once implemented
+                  const id = tutor.tutorId || tutor.id;
+                  if (id) {
+                    router.push({
+                      pathname: "/(student)/tutor-profile",
+                      params: { tutorId: id },
+                    } as any);
+                  }
                 }}
                 style={({ pressed }) => [
                   styles.tutorCard,
