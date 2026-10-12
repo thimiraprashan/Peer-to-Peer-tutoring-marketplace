@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -26,6 +26,7 @@ import {
   removeSavedModule,
 } from "../../services/savedModuleService";
 import { fetchTutors } from "../../services/tutorService";
+import { getStudyTasks, daysUntil, formatCountdown } from "../../services/studyTaskService";
 import { colors } from "../../theme/colors";
 
 const FILTER_SUBJECTS = ["IT", "Business", "Engineering"];
@@ -60,6 +61,25 @@ export default function StudentHome() {
     name?: string;
     general?: string;
   }>({});
+
+  // Study Planner state
+  const [nextTask, setNextTask] = useState<any>(null);
+  const [loadingTasks, setLoadingTasks] = useState(true);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.uid) {
+        setLoadingTasks(true);
+        getStudyTasks(user.uid)
+          .then((tasks) => {
+            const next = tasks.find((t) => t.status !== "done");
+            setNextTask(next || null);
+          })
+          .catch(console.error)
+          .finally(() => setLoadingTasks(false));
+      }
+    }, [user?.uid])
+  );
 
   // 1. Load tutors from service
   const loadTutors = useCallback(async (subject: string | null) => {
@@ -445,6 +465,49 @@ export default function StudentHome() {
                 ) : null}
               </Pressable>
             ))}
+          </View>
+        )}
+
+        {/* Next Deadline Section */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Next Deadline</Text>
+        </View>
+
+        {loadingTasks ? (
+          <View style={styles.centerContainer}>
+            <ActivityIndicator size="small" color={colors.primary} />
+          </View>
+        ) : nextTask ? (
+          <View style={styles.deadlineCard}>
+            <View style={styles.deadlineInfo}>
+              <Text style={styles.deadlineTitle} numberOfLines={1}>
+                {nextTask.title}
+              </Text>
+              <Text style={styles.deadlineModule}>
+                {nextTask.moduleCode} • {formatCountdown(daysUntil(nextTask.dueDate))}
+              </Text>
+            </View>
+            <Pressable
+              onPress={() => router.push("/(student)/planner" as any)}
+              accessibilityRole="button"
+              accessibilityLabel="View planner"
+              style={styles.viewPlannerButton}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={styles.viewPlannerText}>View planner</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={styles.deadlineEmptyCard}>
+            <Text style={styles.emptyModulesText}>No deadlines yet.</Text>
+            <Pressable
+              onPress={() => router.push("/(student)/planner" as any)}
+              accessibilityRole="button"
+              accessibilityLabel="Add deadline"
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={styles.viewPlannerText}>Add one</Text>
+            </Pressable>
           </View>
         )}
 
@@ -885,5 +948,57 @@ const styles = StyleSheet.create({
   },
   modalButtonFlex: {
     flex: 1,
+  },
+  deadlineCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 24,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+    justifyContent: "space-between",
+  },
+  deadlineInfo: {
+    flex: 1,
+    marginRight: 12,
+  },
+  deadlineTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: colors.text,
+  },
+  deadlineModule: {
+    fontSize: 13,
+    color: colors.primary,
+    fontWeight: "500",
+    marginTop: 4,
+  },
+  viewPlannerButton: {
+    backgroundColor: colors.lightGreen,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    minHeight: 48,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  viewPlannerText: {
+    color: colors.primary,
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  deadlineEmptyCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.card,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 24,
+    justifyContent: "space-between",
   },
 });

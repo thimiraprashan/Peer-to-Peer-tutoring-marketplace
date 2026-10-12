@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { auth } from '../../firebase';
 import { colors } from '../../theme/colors';
 import { AppButton } from '../../components/ui/AppButton';
@@ -73,6 +75,28 @@ export default function ProfileScreen() {
         ) : null}
       </View>
 
+      {/* Study Planner Navigation Row */}
+      <Pressable
+        style={({ pressed }) => [
+          styles.menuRow,
+          pressed && styles.menuRowPressed,
+        ]}
+        onPress={() => router.push('/(student)/planner' as any)}
+        accessibilityRole="button"
+        accessibilityLabel="Open Study Planner"
+      >
+        <View style={styles.menuRowLeft}>
+          <View style={styles.menuIconContainer}>
+            <Ionicons name="calendar-outline" size={22} color={colors.primary} />
+          </View>
+          <View style={styles.menuTextContainer}>
+            <Text style={styles.menuTitle}>Study Planner</Text>
+            <Text style={styles.menuSubtitle}>Manage exams, assignments & deadlines</Text>
+          </View>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={colors.mutedText} />
+      </Pressable>
+
       {/* Logout Button */}
       <View style={styles.buttonWrapper}>
         <AppButton
@@ -130,5 +154,53 @@ const styles = StyleSheet.create({
   },
   buttonWrapper: {
     marginTop: 8,
+  },
+  menuRow: {
+    backgroundColor: colors.card,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  menuRowPressed: {
+    opacity: 0.8,
+    backgroundColor: '#F9FCF8',
+  },
+  menuRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  menuIconContainer: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: colors.lightGreen,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 14,
+  },
+  menuTextContainer: {
+    flex: 1,
+  },
+  menuTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.text,
+  },
+  menuSubtitle: {
+    fontSize: 13,
+    color: colors.mutedText,
+    marginTop: 2,
   },
 });
