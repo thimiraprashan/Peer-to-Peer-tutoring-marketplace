@@ -84,3 +84,66 @@ export const markSessionCompleted = async (bookingId, slotId) => {
     throw error;
   }
 };
+
+/**
+ * Create a new booking request from a student to a tutor.
+ */
+export const createBooking = async ({
+  tutorId,
+  tutorName,
+  studentId,
+  studentName,
+  subjectCode,
+  slotId,
+  date,
+  startTime,
+  endTime,
+  mode,
+  note,
+  price,
+}) => {
+  try {
+    const bookingRef = await addDoc(collection(db, 'bookings'), {
+      tutorId,
+      tutorName: tutorName || 'Tutor',
+      studentId,
+      studentName: studentName || 'Student',
+      subjectCode: subjectCode || '',
+      slotId: slotId || null,
+      date: date || '',
+      startTime: startTime || '',
+      endTime: endTime || '',
+      mode: mode || 'online',
+      note: note || '',
+      price: Number(price) || 0,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    });
+
+    if (slotId) {
+      try {
+        await updateDoc(doc(db, 'availability', slotId), { isBooked: true });
+      } catch (e) {
+        console.warn('Could not mark slot booked:', e);
+      }
+    }
+
+    try {
+      await addDoc(collection(db, 'notifications'), {
+        userId: tutorId,
+        type: 'new_booking',
+        message: `${studentName || 'A student'} requested a session for ${subjectCode || 'tutoring'}.`,
+        bookingId: bookingRef.id,
+        read: false,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.warn('Could not create notification:', e);
+    }
+
+    return bookingRef.id;
+  } catch (error) {
+    console.error('Error creating booking:', error);
+    throw error;
+  }
+};
