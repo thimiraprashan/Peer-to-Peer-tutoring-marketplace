@@ -3,7 +3,7 @@ import {
     signInWithEmailAndPassword,
     signOut,
 } from 'firebase/auth';
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, serverTimestamp, setDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 
 // CREATE: register a new user and save the profile
@@ -30,6 +30,14 @@ export const getUserProfile = async (uid) => {
 export const loginUser = async (email, password) => {
     const cred = await signInWithEmailAndPassword(auth, email, password);
     return getUserProfile(cred.user.uid);
+};
+
+// UPDATE: edit user profile fields (name, faculty, etc.)
+export const updateUserProfile = async (uid, data) => {
+    if (!uid) throw new Error('User ID is required');
+    const updateData = { ...data, updatedAt: serverTimestamp() };
+    await updateDoc(doc(db, 'users', uid), updateData);
+    return getUserProfile(uid);
 };
 
 export const logoutUser = () => signOut(auth);

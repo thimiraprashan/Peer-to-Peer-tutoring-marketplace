@@ -39,5 +39,17 @@ export function useCurrentUser() {
     return () => unsubscribe();
   }, []);
 
-  return { user, profile, loading };
+  const refreshProfile = async () => {
+    if (auth.currentUser) {
+      try {
+        const userProfile = await getUserProfile(auth.currentUser.uid);
+        setProfile(userProfile as UserProfile | null);
+        return userProfile;
+      } catch (error) {
+        console.error('Error refreshing profile:', error);
+      }
+    }
+  };
+
+  return { user, profile, setProfile, loading, refreshProfile };
 }

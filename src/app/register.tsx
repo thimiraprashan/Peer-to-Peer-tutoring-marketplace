@@ -19,7 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../theme/colors';
 import { AppButton } from '../components/ui/AppButton';
 import { AppInput } from '../components/ui/AppInput';
-import { registerUser } from '../services/authService';
+import { logoutUser, registerUser } from '../services/authService';
 
 const VALID_ROLES = ['student', 'tutor', 'admin'];
 
@@ -71,65 +71,50 @@ export default function Register() {
   // Helper validation checks
   const trimmedName = name.trim();
   const trimmedEmail = email.trim();
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-  const isNameValid = trimmedName.length >= 2;
-  const isEmailValid = emailRegex.test(trimmedEmail);
-  const isPasswordValid = password.length >= 6;
-  const isConfirmPasswordValid = password === confirmPassword && confirmPassword.length > 0;
-
-  // Button disabled until entire form is valid
-  const isFormValid =
-    isNameValid &&
-    isEmailValid &&
-    isPasswordValid &&
-    isConfirmPasswordValid &&
-    !loading;
 
   const handleRegister = async () => {
     Keyboard.dismiss();
 
     let hasError = false;
 
-    if (!isNameValid) {
-      setNameError(
-        trimmedName.length === 0
-          ? 'Name is required'
-          : 'Name must be at least 2 characters'
-      );
+    // Name: must be filled
+    if (trimmedName.length === 0) {
+      setNameError('Please fill this field');
       hasError = true;
     } else {
       setNameError('');
     }
 
-    if (!isEmailValid) {
-      setEmailError(
-        trimmedEmail.length === 0
-          ? 'Email is required'
-          : 'Enter a valid email'
-      );
+    // Email: must contain @
+    if (trimmedEmail.length === 0) {
+      setEmailError('Please fill this field');
+      hasError = true;
+    } else if (!trimmedEmail.includes('@')) {
+      setEmailError('Email must contain @');
       hasError = true;
     } else {
       setEmailError('');
     }
 
-    if (!isPasswordValid) {
-      setPasswordError(
-        password.length === 0
-          ? 'Password is required'
-          : 'Password must be at least 6 characters'
-      );
+    // Faculty: optional — no validation needed
+
+    // Password: must be filled and at least 6 characters
+    if (password.length === 0) {
+      setPasswordError('Please fill this field');
+      hasError = true;
+    } else if (password.length < 6) {
+      setPasswordError('Password must have at least 6 characters');
       hasError = true;
     } else {
       setPasswordError('');
     }
 
-    if (!isConfirmPasswordValid) {
-      setConfirmPasswordError(
-        confirmPassword.length === 0
-          ? 'Please confirm your password'
-          : 'Passwords must match'
-      );
+    // Confirm password: must match password
+    if (confirmPassword.length === 0) {
+      setConfirmPasswordError('Please fill this field');
+      hasError = true;
+    } else if (password !== confirmPassword) {
+      setConfirmPasswordError('Passwords do not match');
       hasError = true;
     } else {
       setConfirmPasswordError('');
@@ -152,13 +137,15 @@ export default function Register() {
         return;
       }
 
-      if (!VALID_ROLES.includes(profile.role)) {
-        Alert.alert('Error', `Invalid role "${profile.role}".`);
-        return;
-      }
+      // Sign out immediately so user must log in
+      await logoutUser();
 
-      const destination = profile.role === 'student' ? '/(student)' : `/${profile.role}`;
-      router.replace(destination as any);
+      Alert.alert(
+        'Account Created!',
+        'Your account has been created successfully. Please log in to continue.',
+        [{ text: 'Go to Login', onPress: () => router.replace('/login' as any) }]
+      );
+      router.replace('/login' as any);
     } catch (e: any) {
       Alert.alert('Registration failed', getFriendlyErrorMessage(e));
     } finally {
@@ -332,7 +319,7 @@ export default function Register() {
                 title="Create Account"
                 onPress={handleRegister}
                 loading={loading}
-                disabled={!isFormValid}
+                disabled={loading}
               />
             </View>
           </View>

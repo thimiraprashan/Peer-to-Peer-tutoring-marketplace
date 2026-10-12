@@ -181,13 +181,17 @@ export default function TutorProfileScreen() {
   const isStudent = currentProfile?.role === "student" || !currentProfile?.role;
 
   const { favouriteIds, toggleFavourite } = useStudentFavourites(user?.uid);
-  const isFavourited = tutorId ? favouriteIds.has(tutorId) : false;
 
   // Data state
   const [tutorProfile, setTutorProfile] = useState<TutorProfileData | null>(null);
   const [slots, setSlots] = useState<Slot[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+
+  const effectiveId = tutorProfile?.tutorId || tutorProfile?.id || tutorId;
+  const isFavourited = effectiveId
+    ? favouriteIds.has(effectiveId) || (tutorId ? favouriteIds.has(tutorId) : false)
+    : false;
 
   // UI state
   const [bioExpanded, setBioExpanded] = useState<boolean>(false);
@@ -528,7 +532,10 @@ export default function TutorProfileScreen() {
 
         <View style={styles.navRightActions}>
           <TouchableOpacity
-            onPress={() => { if (tutorId) toggleFavourite(tutorId); }}
+            onPress={() => {
+              const targetId = effectiveId || tutorId;
+              if (targetId) toggleFavourite(targetId);
+            }}
             accessibilityRole="button"
             accessibilityLabel={isFavourited ? "Remove from favourites" : "Save as favourite"}
             style={styles.navBtn}

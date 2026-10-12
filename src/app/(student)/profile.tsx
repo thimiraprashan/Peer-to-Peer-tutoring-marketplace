@@ -2,7 +2,11 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -12,8 +16,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { auth } from '../../firebase';
 import { colors } from '../../theme/colors';
 import { AppButton } from '../../components/ui/AppButton';
+import { AppInput } from '../../components/ui/AppInput';
 import { Avatar } from '../../components/ui/Avatar';
-import { getUserProfile, logoutUser } from '../../services/authService';
+import { getUserProfile, logoutUser, updateUserProfile } from '../../services/authService';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -22,21 +27,28 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
 
-  useEffect(() => {
-    const fetchProfile = async () => {
-      try {
-        const currentUser = auth.currentUser;
-        if (currentUser) {
-          const data = await getUserProfile(currentUser.uid);
-          setProfile(data || { name: currentUser.displayName || 'Student', email: currentUser.email });
-        }
-      } catch (e: any) {
-        Alert.alert('Error', 'Failed to load user profile');
-      } finally {
-        setLoading(false);
-      }
-    };
+  // Edit profile modal state
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editFaculty, setEditFaculty] = useState('');
+  const [editNameError, setEditNameError] = useState('');
+  const [saving, setSaving] = useState(false);
 
+  const fetchProfile = async () => {
+    try {
+      const currentUser = auth.currentUser;
+      if (currentUser) {
+        const data = await getUserProfile(currentUser.uid);
+        setProfile(data || { name: currentUser.displayName || 'Student', email: currentUser.email });
+      }
+    } catch (e: any) {
+      Alert.alert('Error', 'Failed to load user profile');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchProfile();
   }, []);
 
@@ -49,6 +61,47 @@ export default function ProfileScreen() {
       Alert.alert('Logout failed', e.message || 'Please try again.');
     } finally {
       setLoggingOut(false);
+    }
+  };
+
+  const openEditModal = () => {
+    setEditName(profile?.name || '');
+    setEditFaculty(profile?.faculty || '');
+    setEditNameError('');
+    setEditModalVisible(true);
+  };
+
+  const handleSaveProfile = async () => {
+    const trimmedName = editName.trim();
+    if (trimmedName.length === 0) {
+      setEditNameError('Name cannot be empty');
+      return;
+    }
+    if (trimmedName.length < 2) {
+      setEditNameError('Name must be at least 2 characters');
+      return;
+    }
+    setEditNameError('');
+
+    const uid = auth.currentUser?.uid;
+    if (!uid) {
+      Alert.alert('Error', 'You must be signed in to update your profile.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const updated = await updateUserProfile(uid, {
+        name: trimmedName,
+        faculty: editFaculty.trim(),
+      });
+      setProfile(updated);
+      setEditModalVisible(false);
+      Alert.alert('Profile Updated', 'Your profile has been updated successfully.');
+    } catch (e: any) {
+      Alert.alert('Update Failed', e.message || 'Could not update profile.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -73,6 +126,20 @@ export default function ProfileScreen() {
         {profile?.faculty ? (
           <Text style={styles.faculty}>{profile.faculty}</Text>
         ) : null}
+
+        {/* Edit Profile Button */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.editProfileBtn,
+            pressed && styles.editProfileBtnPressed,
+          ]}
+          onPress={openEditModal}
+          accessibilityRole="button"
+          accessibilityLabel="Edit Profile"
+        >
+          <Ionicons name="create-outline" size={16} color={colors.primary} />
+          <Text style={styles.editProfileBtnText}>Edit Profile</Text>
+        </Pressable>
       </View>
 
       {/* Study Planner Navigation Row */}
@@ -106,6 +173,94 @@ export default function ProfileScreen() {
           loading={loggingOut}
         />
       </View>
+
+      {/* ── Edit Profile Modal ── */}
+      <Modal
+        visible={editModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditModalVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Edit Profile</Text>
+              <Pressable
+                onPress={() => setEditModalVisible(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+                hitSlop={10}
+              >
+                <Ionicons name="close" size={24} color={colors.mutedText} />
+              </Pressable>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Avatar preview */}
+              <View style={styles.modalAvatarRow}>
+                <Avatar name={editName || name} size={64} />
+              </View>
+
+              <AppInput
+                label="Full Name"
+                value={editName}
+                onChangeText={(text: string) => {
+                  setEditName(text);
+                  if (editNameError) setEditNameError('');
+                }}
+                placeholder="Your full name"
+                icon="person-outline"
+                error={editNameError}
+                returnKeyType="next"
+              />
+
+              <AppInput
+                label="Email"
+                value={email}
+                onChangeText={() => {}}
+                placeholder=""
+                icon="mail-outline"
+                editable={false}
+              />
+              <Text style={styles.emailHint}>
+                Email cannot be changed after registration
+              </Text>
+
+              <AppInput
+                label="Faculty (Optional)"
+                value={editFaculty}
+                onChangeText={setEditFaculty}
+                placeholder="e.g. Computing / Engineering"
+                icon="business-outline"
+                returnKeyType="done"
+                onSubmitEditing={handleSaveProfile}
+              />
+            </ScrollView>
+
+            <View style={styles.modalActions}>
+              <View style={styles.modalBtnFlex}>
+                <AppButton
+                  title="Cancel"
+                  onPress={() => setEditModalVisible(false)}
+                  variant="outline"
+                  disabled={saving}
+                />
+              </View>
+              <View style={styles.modalBtnFlex}>
+                <AppButton
+                  title="Save Changes"
+                  onPress={handleSaveProfile}
+                  loading={saving}
+                  disabled={saving}
+                />
+              </View>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -151,6 +306,26 @@ const styles = StyleSheet.create({
     color: colors.primary,
     marginTop: 6,
     fontWeight: '500',
+  },
+  editProfileBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 16,
+    paddingVertical: 9,
+    paddingHorizontal: 18,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.lightGreen,
+  },
+  editProfileBtnPressed: {
+    opacity: 0.7,
+  },
+  editProfileBtnText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary,
   },
   buttonWrapper: {
     marginTop: 8,
@@ -202,5 +377,54 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.mutedText,
     marginTop: 2,
+  },
+
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  modalContent: {
+    backgroundColor: colors.card,
+    borderRadius: 20,
+    padding: 22,
+    maxHeight: '80%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  modalAvatarRow: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  emailHint: {
+    fontSize: 12,
+    color: colors.mutedText,
+    marginTop: -4,
+    marginBottom: 8,
+    marginLeft: 4,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+  },
+  modalBtnFlex: {
+    flex: 1,
   },
 });

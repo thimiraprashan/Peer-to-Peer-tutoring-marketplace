@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -20,6 +20,7 @@ import { AppInput } from "../../components/ui/AppInput";
 import { Avatar } from "../../components/ui/Avatar";
 import { VerifiedBadge } from "../../components/ui/VerifiedBadge";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
+import { useStudentFavourites } from "../../hooks/useStudentFavourites";
 import {
   addSavedModule,
   getSavedModules,
@@ -31,14 +32,95 @@ import { colors } from "../../theme/colors";
 
 const FILTER_SUBJECTS = ["IT", "Business", "Engineering"];
 
+// Helper to check if a tutor is related to any of the student's saved modules
+function isTutorRelatedToSavedModules(tutor: any, savedMods: any[]): boolean {
+  if (!savedMods || savedMods.length === 0) return true;
+
+  const targetCodes = savedMods
+    .map((m) => String(m.moduleCode || "").trim().toUpperCase())
+    .filter(Boolean);
+  const targetNames = savedMods
+    .map((m) => String(m.moduleName || "").trim().toLowerCase())
+    .filter(Boolean);
+
+  if (targetCodes.length === 0 && targetNames.length === 0) return true;
+
+  const tutorCodes: string[] = [];
+  const tutorNames: string[] = [];
+
+  if (tutor.moduleCode && typeof tutor.moduleCode === "string") {
+    tutorCodes.push(tutor.moduleCode.trim().toUpperCase());
+  }
+  if (tutor.moduleName && typeof tutor.moduleName === "string") {
+    tutorNames.push(tutor.moduleName.trim().toLowerCase());
+  }
+  if (tutor.subject && typeof tutor.subject === "string") {
+    tutorCodes.push(tutor.subject.trim().toUpperCase());
+    tutorNames.push(tutor.subject.trim().toLowerCase());
+  }
+
+  if (Array.isArray(tutor.subjects)) {
+    for (const s of tutor.subjects) {
+      if (typeof s === "string") {
+        tutorCodes.push(s.trim().toUpperCase());
+        tutorNames.push(s.trim().toLowerCase());
+      } else if (s && typeof s === "object") {
+        if (s.moduleCode && typeof s.moduleCode === "string") {
+          tutorCodes.push(s.moduleCode.trim().toUpperCase());
+        }
+        if (s.code && typeof s.code === "string") {
+          tutorCodes.push(s.code.trim().toUpperCase());
+        }
+        if (s.moduleName && typeof s.moduleName === "string") {
+          tutorNames.push(s.moduleName.trim().toLowerCase());
+        }
+        if (s.name && typeof s.name === "string") {
+          tutorNames.push(s.name.trim().toLowerCase());
+        }
+        if (s.subjectName && typeof s.subjectName === "string") {
+          tutorNames.push(s.subjectName.trim().toLowerCase());
+        }
+      }
+    }
+  }
+
+  // 1. Code match (e.g. IT3010 vs IT3010 or IT 3010)
+  const codeMatch = targetCodes.some((tc) => {
+    const cleanTc = tc.replace(/\s+/g, "");
+    return tutorCodes.some((tcTutor) => {
+      const cleanTutor = tcTutor.replace(/\s+/g, "");
+      return (
+        cleanTutor === cleanTc ||
+        cleanTutor.includes(cleanTc) ||
+        cleanTc.includes(cleanTutor)
+      );
+    });
+  });
+  if (codeMatch) return true;
+
+  // 2. Name match (e.g. Mobile Application Development)
+  const nameMatch = targetNames.some(
+    (tn) =>
+      tn.length > 2 &&
+      tutorNames.some(
+        (name) => name === tn || name.includes(tn) || tn.includes(name)
+      )
+  );
+  if (nameMatch) return true;
+
+  return false;
+}
+
 export default function StudentHome() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, profile } = useCurrentUser();
+  const { favouriteIds, toggleFavourite } = useStudentFavourites(user?.uid);
 
   // Search & filter state
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
+  const [showAllTutors, setShowAllTutors] = useState(false);
 
   // Tutors list state
   const [tutors, setTutors] = useState<any[]>([]);
@@ -82,7 +164,7 @@ export default function StudentHome() {
   );
 
   // 1. Load tutors from service
-  const loadTutors = useCallback(async (subject: string | null) => {
+  const loadTutors = useCallback(async () => {
     setTutorError(null);
     try {
       const data = await fetchTutors();
@@ -94,6 +176,55 @@ export default function StudentHome() {
       setRefreshing(false);
     }
   }, []);
+
+  // Filter tutors:
+  // - If saved modules exist and showAllTutors is false, only show tutors related to saved modules
+  // - If department chip selected (IT, Business, Engineering), further filter by prefix
+  const filteredTutors = useMemo(() => {
+    let list = tutors;
+
+    // Filter by saved modules if present and user has not clicked "See All"
+    if (!showAllTutors && savedModules.length > 0) {
+      list = list.filter((tutor) =>
+        isTutorRelatedToSavedModules(tutor, savedModules)
+      );
+    }
+
+    if (!selectedSubject) return list;
+
+    let requiredPrefix = "";
+    if (selectedSubject === "IT") {
+      requiredPrefix = "IT";
+    } else if (selectedSubject === "Business") {
+      requiredPrefix = "BM";
+    } else if (selectedSubject === "Engineering") {
+      requiredPrefix = "EE";
+    }
+
+    if (!requiredPrefix) return list;
+
+    return list.filter((tutor) => {
+      const moduleCodes: string[] = [];
+
+      if (tutor.moduleCode && typeof tutor.moduleCode === "string") {
+        moduleCodes.push(tutor.moduleCode.trim().toUpperCase());
+      }
+
+      if (Array.isArray(tutor.subjects)) {
+        for (const s of tutor.subjects) {
+          if (typeof s === "string") {
+            moduleCodes.push(s.trim().toUpperCase());
+          } else if (s?.moduleCode && typeof s.moduleCode === "string") {
+            moduleCodes.push(s.moduleCode.trim().toUpperCase());
+          } else if (s?.code && typeof s.code === "string") {
+            moduleCodes.push(s.code.trim().toUpperCase());
+          }
+        }
+      }
+
+      return moduleCodes.some((code) => code.startsWith(requiredPrefix));
+    });
+  }, [tutors, selectedSubject, savedModules, showAllTutors]);
 
   // 2. Load saved modules for current user
   const loadSavedModules = useCallback(async () => {
@@ -112,8 +243,8 @@ export default function StudentHome() {
   // Initial and reactive loads
   useEffect(() => {
     setLoadingTutors(true);
-    loadTutors(selectedSubject);
-  }, [selectedSubject, loadTutors]);
+    loadTutors();
+  }, [loadTutors]);
 
   useEffect(() => {
     if (user?.uid) {
@@ -125,7 +256,7 @@ export default function StudentHome() {
   // Pull to refresh handler
   const handleRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([loadTutors(selectedSubject), loadSavedModules()]);
+    await Promise.all([loadTutors(), loadSavedModules()]);
     setRefreshing(false);
   };
 
@@ -380,16 +511,49 @@ export default function StudentHome() {
 
         {/* 5. Tutors Section */}
         <View style={[styles.sectionHeader, { marginTop: 12 }]}>
-          <Text style={styles.sectionTitle}>Tutors</Text>
-          <Pressable
-            onPress={() => router.push("/(student)/search" as any)}
-            accessibilityRole="button"
-            accessibilityLabel="See all tutors"
-            style={styles.seeAllTouchable}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <Text style={styles.seeAllText}>See All →</Text>
-          </Pressable>
+          <View style={styles.sectionTitleRow}>
+            <Text style={styles.sectionTitle}>
+              {savedModules.length > 0 && !showAllTutors
+                ? "Tutors for My Modules"
+                : "Tutors"}
+            </Text>
+            {savedModules.length > 0 && !showAllTutors ? (
+              <View style={styles.matchedBadge}>
+                <Ionicons name="sparkles" size={12} color={colors.primary} />
+                <Text style={styles.matchedBadgeText}>
+                  {savedModules.length === 1
+                    ? savedModules[0].moduleCode
+                    : `${savedModules.length} modules`}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          {savedModules.length > 0 ? (
+            <Pressable
+              onPress={() => setShowAllTutors((prev) => !prev)}
+              accessibilityRole="button"
+              accessibilityLabel={
+                showAllTutors ? "Show my modules only" : "See all tutors"
+              }
+              style={styles.seeAllTouchable}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={styles.seeAllText}>
+                {showAllTutors ? "Show My Modules" : "See All →"}
+              </Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              onPress={() => router.push("/(student)/search" as any)}
+              accessibilityRole="button"
+              accessibilityLabel="See all tutors"
+              style={styles.seeAllTouchable}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={styles.seeAllText}>See All →</Text>
+            </Pressable>
+          )}
         </View>
 
         {/* Tutors loading / error / empty / list */}
@@ -408,12 +572,12 @@ export default function StudentHome() {
             <View style={styles.retryButtonWrapper}>
               <AppButton
                 title="Try again"
-                onPress={() => loadTutors(selectedSubject)}
+                onPress={loadTutors}
                 variant="outline"
               />
             </View>
           </View>
-        ) : tutors.length === 0 ? (
+        ) : filteredTutors.length === 0 ? (
           <View style={styles.stateCard}>
             <Ionicons
               name="school-outline"
@@ -421,12 +585,35 @@ export default function StudentHome() {
               color={colors.mutedText}
             />
             <Text style={styles.emptyText}>
-              No tutors found for this subject
+              {selectedSubject
+                ? `No tutors found in ${selectedSubject} department`
+                : savedModules.length > 0 && !showAllTutors
+                ? `No tutors found for your saved module${
+                    savedModules.length > 1 ? "s" : ""
+                  } (${savedModules.map((m) => m.moduleCode).join(", ")})`
+                : "No tutors found"}
             </Text>
+            {savedModules.length > 0 && !showAllTutors ? (
+              <Pressable
+                onPress={() => setShowAllTutors(true)}
+                style={styles.clearSubjectBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.clearSubjectText}>Show All Tutors</Text>
+              </Pressable>
+            ) : selectedSubject ? (
+              <Pressable
+                onPress={() => setSelectedSubject(null)}
+                style={styles.clearSubjectBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.clearSubjectText}>Show All Tutors</Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : (
           <View style={styles.tutorsList}>
-            {tutors.map((tutor) => (
+            {filteredTutors.map((tutor) => (
               <Pressable
                 key={tutor.tutorId}
                 onPress={() => {
@@ -464,13 +651,66 @@ export default function StudentHome() {
                   </Text>
                 </View>
 
-                {tutor.verified ? (
-                  <View style={styles.badgeWrapper}>
-                    <VerifiedBadge />
-                  </View>
-                ) : null}
+                <View style={styles.cardRightActions}>
+                  {tutor.verified ? (
+                    <View style={styles.badgeWrapper}>
+                      <VerifiedBadge />
+                    </View>
+                  ) : null}
+                  <Pressable
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      const id = tutor.tutorId || tutor.id;
+                      if (id) toggleFavourite(id);
+                    }}
+                    style={styles.favIconButton}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      favouriteIds.has(tutor.tutorId || tutor.id)
+                        ? "Remove from favourites"
+                        : "Add to favourites"
+                    }
+                  >
+                    <Ionicons
+                      name={
+                        favouriteIds.has(tutor.tutorId || tutor.id)
+                          ? "heart"
+                          : "heart-outline"
+                      }
+                      size={20}
+                      color={
+                        favouriteIds.has(tutor.tutorId || tutor.id)
+                          ? "#E53935"
+                          : colors.mutedText
+                      }
+                    />
+                  </Pressable>
+                </View>
               </Pressable>
             ))}
+
+            {savedModules.length > 0 && !showAllTutors ? (
+              <Pressable
+                onPress={() => setShowAllTutors(true)}
+                style={styles.seeAllBanner}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.seeAllBannerText}>
+                  Want to explore other subjects? View all tutors →
+                </Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => router.push("/(student)/search" as any)}
+                style={styles.seeAllBanner}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Text style={styles.seeAllBannerText}>
+                  Explore & search all tutors with filters →
+                </Text>
+              </Pressable>
+            )}
           </View>
         )}
 
@@ -713,10 +953,30 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 10,
   },
+  sectionTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    flexShrink: 1,
+  },
   sectionTitle: {
     fontSize: 18,
     fontWeight: "700",
     color: colors.text,
+  },
+  matchedBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: colors.lightGreen,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 12,
+  },
+  matchedBadgeText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: colors.primary,
   },
   seeAllTouchable: {
     minHeight: 48,
@@ -725,6 +985,20 @@ const styles = StyleSheet.create({
   },
   seeAllText: {
     fontSize: 14,
+    fontWeight: "600",
+    color: colors.primary,
+  },
+  seeAllBanner: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    marginTop: 4,
+    marginBottom: 8,
+    borderRadius: 12,
+    backgroundColor: "#F3F7F2",
+  },
+  seeAllBannerText: {
+    fontSize: 13,
     fontWeight: "600",
     color: colors.primary,
   },
@@ -844,6 +1118,18 @@ const styles = StyleSheet.create({
     marginTop: 12,
     width: 140,
   },
+  clearSubjectBtn: {
+    marginTop: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: colors.lightGreen,
+  },
+  clearSubjectText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.primary,
+  },
   tutorsList: {
     gap: 10,
     marginBottom: 24,
@@ -896,6 +1182,16 @@ const styles = StyleSheet.create({
   },
   badgeWrapper: {
     alignSelf: "center",
+  },
+  cardRightActions: {
+    alignItems: "flex-end",
+    justifyContent: "center",
+    gap: 8,
+  },
+  favIconButton: {
+    padding: 6,
+    borderRadius: 16,
+    backgroundColor: "#F3F4F6",
   },
   bookingPlaceholderCard: {
     flexDirection: "row",

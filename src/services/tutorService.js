@@ -332,18 +332,21 @@ export const fetchTutors = async () => {
           ),
         ]);
         const userData = userSnap.exists() ? userSnap.data() : {};
-        const firstSubject = subjectsSnap.docs[0]?.data() || {};
+        const allSubjects = subjectsSnap.docs.map((s) => s.data());
+        const firstSubject = allSubjects[0] || {};
 
         results.push({
           ...tutor,
           name: userData.name || tutor.name || "Tutor",
           moduleCode: firstSubject.moduleCode || tutor.moduleCode || "",
           moduleName: firstSubject.moduleName || tutor.moduleName || "",
+          subjects: allSubjects.length > 0 ? allSubjects : (Array.isArray(tutor.subjects) ? tutor.subjects : []),
         });
       } catch {
         results.push({
           ...tutor,
           name: tutor.name || "Tutor",
+          subjects: Array.isArray(tutor.subjects) ? tutor.subjects : [],
         });
       }
     }

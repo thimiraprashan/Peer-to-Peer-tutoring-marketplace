@@ -24,6 +24,8 @@ interface AppInputProps {
   inputRef?: React.Ref<TextInput>;
   error?: string;
   icon?: keyof typeof Ionicons.glyphMap;
+  editable?: boolean;
+  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
 }
 
 export const AppInput: React.FC<AppInputProps> = ({
@@ -39,6 +41,8 @@ export const AppInput: React.FC<AppInputProps> = ({
   inputRef,
   error,
   icon,
+  editable = true,
+  autoCapitalize = 'none',
 }) => {
   // Toggle password visibility
   const [hidePassword, setHidePassword] = useState(secureTextEntry);
@@ -53,6 +57,7 @@ export const AppInput: React.FC<AppInputProps> = ({
         style={[
           styles.inputContainer,
           error ? styles.inputContainerError : null,
+          !editable ? styles.inputContainerDisabled : null,
         ]}
       >
         {/* Left Icon */}
@@ -77,9 +82,10 @@ export const AppInput: React.FC<AppInputProps> = ({
           returnKeyType={returnKeyType}
           onSubmitEditing={onSubmitEditing}
           blurOnSubmit={blurOnSubmit}
-          autoCapitalize="none"
+          autoCapitalize={autoCapitalize}
+          editable={editable}
           accessibilityLabel={label || placeholder || 'Text input'}
-          style={styles.textInput}
+          style={[styles.textInput, !editable ? styles.textInputDisabled : null]}
         />
 
         {/* Password Eye Toggle Icon */}
@@ -135,6 +141,11 @@ const styles = StyleSheet.create({
   inputContainerError: {
     borderColor: colors.error,
   },
+  inputContainerDisabled: {
+    backgroundColor: '#F3F4F6',
+    borderColor: '#E5E7EB',
+    opacity: 0.8,
+  },
   leftIcon: {
     marginRight: 10,
   },
@@ -143,6 +154,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.text,
     paddingVertical: 12,
+  },
+  textInputDisabled: {
+    color: colors.mutedText,
   },
   eyeButton: {
     padding: 8,
