@@ -10,6 +10,11 @@
  * - Long-press own messages to delete (with confirmation)
  * - Input + attachment button always visible at bottom, even with keyboard open
  */
+import { Ionicons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
+import * as ImagePicker from 'expo-image-picker';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -19,20 +24,16 @@ import {
   Modal,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  View,
+  View
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
-import { colors } from '../../theme/colors';
-import { Avatar } from '../../components/ui/Avatar';
 import { MessageBubble } from '../../components/chat/MessageBubble';
+import { AppButton } from '../../components/ui/AppButton';
+import { Avatar } from '../../components/ui/Avatar';
 import { useCurrentUser } from '../../hooks/useCurrentUser';
 import {
   ChatMessage,
@@ -43,6 +44,8 @@ import {
   sendTextMessage,
   subscribeToMessages,
 } from '../../services/chatService';
+import { createReport, ReportSeverity, ReportType } from '../../services/reportsService';
+import { colors } from '../../theme/colors';
 
 export default function ChatDetailScreen() {
   const { conversationId } = useLocalSearchParams<{ conversationId: string }>();
@@ -59,6 +62,13 @@ export default function ChatDetailScreen() {
   const [sending, setSending] = useState(false);
   const [attachmentMenuVisible, setAttachmentMenuVisible] = useState(false);
   const [uploading, setUploading] = useState(false);
+
+  // Report modal state
+  const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [reportType, setReportType] = useState<ReportType>('misconduct');
+  const [reportSeverity, setReportSeverity] = useState<ReportSeverity>('medium');
+  const [reportDescription, setReportDescription] = useState('');
+  const [submittingReport, setSubmittingReport] = useState(false);
 
   const flatListRef = useRef<FlatList>(null);
   const unsubRef = useRef<(() => void) | null>(null);
@@ -102,7 +112,8 @@ export default function ChatDetailScreen() {
   // ─── Derived: other participant name ─────────────────────────────────────
   const otherParticipantName = React.useMemo(() => {
     if (!conversation || !user?.uid) return 'Chat';
-    const otherId = conversation.participants.find((p: string) => p !== user.uid);
+    const participantList = conversation.participantIds || conversation.participants || [];
+    const otherId = participantList.find((p: string) => p !== user.uid);
     return otherId
       ? conversation.participantNames?.[otherId] || 'Unknown User'
       : 'Chat';
@@ -225,6 +236,51 @@ export default function ChatDetailScreen() {
     );
   };
 
+  // ─── Report user ──────────────────────────────────────────────────────────
+  const handleOpenReportModal = () => {
+    setReportModalVisible(true);
+    setReportType('misconduct');
+    setReportSeverity('medium');
+    setReportDescription('');
+  };
+
+  const handleSubmitReport = async () => {
+    if (!reportDescription.trim()) {
+      Alert.alert('Required', 'Please provide a description for the report.');
+      return;
+    }
+
+    if (!conversation || !user?.uid) return;
+
+    // Get the other participant's ID
+    const participantList = conversation.participantIds || conversation.participants || [];
+    const reportedUserId = participantList.find((p: string) => p !== user.uid);
+
+    if (!reportedUserId) {
+      Alert.alert('Error', 'Could not identify the user to report.');
+      return;
+    }
+
+    setSubmittingReport(true);
+    try {
+      await createReport({
+        reportedUserId,
+        reporterId: user.uid,
+        type: reportType,
+        description: reportDescription.trim(),
+        severity: reportSeverity,
+      });
+
+      Alert.alert('Success', 'Report submitted successfully. An admin will review it.');
+      setReportModalVisible(false);
+      setReportDescription('');
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Failed to submit report.');
+    } finally {
+      setSubmittingReport(false);
+    }
+  };
+
   // ─── Render ───────────────────────────────────────────────────────────────
   const canSend = inputText.trim().length > 0 && !sending && !uploading;
 
@@ -255,9 +311,22 @@ export default function ChatDetailScreen() {
           )}
         </View>
 
-        {uploading && (
-          <ActivityIndicator size="small" color={colors.primary} style={{ marginLeft: 8 }} />
-        )}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {uploading && (
+            <ActivityIndicator size="small" color={colors.primary} />
+          )}
+          {!loadingConv && (
+            <Pressable
+              style={styles.reportButton}
+              onPress={handleOpenReportModal}
+              accessibilityRole="button"
+              accessibilityLabel="Report user"
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Ionicons name="flag-outline" size={20} color={colors.error} />
+            </Pressable>
+          )}
+        </View>
       </View>
 
       {/* ── Message list + Input wrapper (KeyboardAvoidingView) ── */}
@@ -288,19 +357,21 @@ export default function ChatDetailScreen() {
             renderItem={({ item, index }) => {
               const isOwn = item.senderId === user?.uid;
               const prevMsg = messages[index - 1];
+              const msgTimestamp = item.sentAt || item.createdAt;
+              const prevMsgTimestamp = prevMsg?.sentAt || prevMsg?.createdAt;
               const showDateSeparator =
                 index === 0 ||
-                (prevMsg?.createdAt &&
-                  item.createdAt &&
-                  prevMsg.createdAt.toDate().toDateString() !==
-                    item.createdAt.toDate().toDateString());
+                (prevMsgTimestamp &&
+                  msgTimestamp &&
+                  prevMsgTimestamp.toDate().toDateString() !==
+                    msgTimestamp.toDate().toDateString());
 
               return (
                 <>
-                  {showDateSeparator && item.createdAt && (
+                  {showDateSeparator && msgTimestamp && (
                     <View style={styles.dateSeparator}>
                       <Text style={styles.dateSeparatorText}>
-                        {item.createdAt.toDate().toLocaleDateString([], {
+                        {msgTimestamp.toDate().toLocaleDateString([], {
                           weekday: 'long',
                           month: 'short',
                           day: 'numeric',
@@ -310,13 +381,13 @@ export default function ChatDetailScreen() {
                   )}
                   <MessageBubble
                     senderId={item.senderId}
-                    senderName={item.senderName}
+                    senderName={item.senderName || 'Unknown'}
                     text={item.text}
                     attachmentUrl={item.attachmentUrl}
                     attachmentName={item.attachmentName}
-                    attachmentType={item.attachmentType}
-                    createdAt={item.createdAt}
-                    deletedAt={item.deletedAt}
+                    attachmentType={item.attachmentType || null}
+                    createdAt={msgTimestamp}
+                    deletedAt={item.deletedAt || null}
                     isOwn={isOwn}
                     onLongPress={
                       isOwn ? () => handleDeleteMessage(item.id) : undefined
@@ -458,6 +529,123 @@ export default function ChatDetailScreen() {
             </Pressable>
           </Pressable>
         </Pressable>
+      </Modal>
+
+      {/* ── Report User Modal ── */}
+      <Modal
+        visible={reportModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setReportModalVisible(false)}
+      >
+        <View style={styles.reportOverlay}>
+          <Pressable
+            style={styles.reportBackdrop}
+            onPress={() => setReportModalVisible(false)}
+          />
+          <View style={styles.reportModal}>
+            <ScrollView
+              contentContainerStyle={styles.reportContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={styles.reportHeader}>
+                <Text style={styles.reportTitle}>Report User</Text>
+                <Pressable
+                  onPress={() => setReportModalVisible(false)}
+                  style={styles.reportCloseButton}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="close" size={24} color={colors.text} />
+                </Pressable>
+              </View>
+
+              <Text style={styles.reportSubtitle}>
+                Report {otherParticipantName} for inappropriate behavior
+              </Text>
+
+              {/* Report Type */}
+              <View style={styles.reportSection}>
+                <Text style={styles.reportLabel}>Report Type</Text>
+                <View style={styles.optionGroup}>
+                  {(['no-show', 'misconduct', 'other'] as ReportType[]).map((type) => (
+                    <Pressable
+                      key={type}
+                      style={[
+                        styles.optionButton,
+                        reportType === type && styles.optionButtonSelected,
+                      ]}
+                      onPress={() => setReportType(type)}
+                    >
+                      <Text
+                        style={[
+                          styles.optionText,
+                          reportType === type && styles.optionTextSelected,
+                        ]}
+                      >
+                        {type === 'no-show' ? 'No-Show' : type.charAt(0).toUpperCase() + type.slice(1)}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              {/* Severity */}
+              <View style={styles.reportSection}>
+                <Text style={styles.reportLabel}>Severity</Text>
+                <View style={styles.optionGroup}>
+                  {(['low', 'medium', 'high'] as ReportSeverity[]).map((severity) => (
+                    <Pressable
+                      key={severity}
+                      style={[
+                        styles.optionButton,
+                        reportSeverity === severity && styles.optionButtonSelected,
+                      ]}
+                      onPress={() => setReportSeverity(severity)}
+                    >
+                      <Text
+                        style={[
+                          styles.optionText,
+                          reportSeverity === severity && styles.optionTextSelected,
+                        ]}
+                      >
+                        {severity.charAt(0).toUpperCase() + severity.slice(1)}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+
+              {/* Description */}
+              <View style={styles.reportSection}>
+                <Text style={styles.reportLabel}>Description *</Text>
+                <TextInput
+                  style={styles.reportInput}
+                  value={reportDescription}
+                  onChangeText={setReportDescription}
+                  placeholder="Describe the issue in detail..."
+                  placeholderTextColor={colors.mutedText}
+                  multiline
+                  numberOfLines={5}
+                  textAlignVertical="top"
+                  maxLength={500}
+                />
+                <Text style={styles.charCount}>
+                  {reportDescription.length}/500
+                </Text>
+              </View>
+
+              {/* Submit Button */}
+              <View style={styles.reportActions}>
+                <AppButton
+                  title="Submit Report"
+                  onPress={handleSubmitReport}
+                  loading={submittingReport}
+                  disabled={submittingReport || !reportDescription.trim()}
+                />
+              </View>
+            </ScrollView>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -672,5 +860,107 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: colors.mutedText,
+  },
+  reportButton: {
+    padding: 4,
+  },
+  reportOverlay: {
+    flex: 1,
+    backgroundColor: colors.overlay,
+    justifyContent: 'flex-end',
+  },
+  reportBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  reportModal: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '90%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  reportContent: {
+    padding: 24,
+  },
+  reportHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  reportTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  reportCloseButton: {
+    padding: 4,
+  },
+  reportSubtitle: {
+    fontSize: 14,
+    color: colors.mutedText,
+    marginBottom: 24,
+  },
+  reportSection: {
+    marginBottom: 20,
+  },
+  reportLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.text,
+    marginBottom: 10,
+  },
+  optionGroup: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  optionButton: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.background,
+    alignItems: 'center',
+  },
+  optionButtonSelected: {
+    backgroundColor: colors.lightGreen,
+    borderColor: colors.primary,
+  },
+  optionText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.mutedText,
+  },
+  optionTextSelected: {
+    color: colors.primary,
+  },
+  reportInput: {
+    backgroundColor: colors.background,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 15,
+    color: colors.text,
+    minHeight: 100,
+  },
+  charCount: {
+    fontSize: 12,
+    color: colors.mutedText,
+    textAlign: 'right',
+    marginTop: 4,
+  },
+  reportActions: {
+    marginTop: 8,
   },
 });

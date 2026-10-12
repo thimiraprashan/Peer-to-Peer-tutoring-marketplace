@@ -2,31 +2,23 @@
  * chatService.ts
  * Firestore + Firebase Storage operations for the Chat / Messaging module.
  *
- * Firestore schema:
+ * Required Firestore schema:
  *   conversations/{conversationId}
- *     - participants: string[]          (array of user UIDs)
- *     - participantNames: {uid: name}   (map for display)
+ *     - participantIds: string[]        (array of user UIDs)
  *     - lastMessage: string
- *     - lastMessageTime: Timestamp
- *     - lastSenderId: string
- *     - unreadCount: {uid: number}      (per-user unread count)
- *     - createdAt: Timestamp
+ *     - lastMessageAt: Timestamp
  *
  *   conversations/{conversationId}/messages/{messageId}
  *     - senderId: string
- *     - senderName: string
  *     - text: string
  *     - attachmentUrl: string | null
  *     - attachmentName: string | null
- *     - attachmentType: string | null   ('image' | 'file')
- *     - createdAt: Timestamp
- *     - deletedAt: Timestamp | null
+ *     - sentAt: Timestamp
  */
 
 import {
   addDoc,
   collection,
-  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -38,7 +30,7 @@ import {
   setDoc,
   Timestamp,
   updateDoc,
-  where,
+  where
 } from 'firebase/firestore';
 import {
   getDownloadURL,
@@ -51,25 +43,30 @@ import { db, storage } from '../firebase';
 
 export interface Conversation {
   id: string;
-  participants: string[];
-  participantNames: Record<string, string>;
+  participantIds: string[];
   lastMessage: string;
-  lastMessageTime: Timestamp | null;
-  lastSenderId: string;
-  unreadCount: Record<string, number>;
-  createdAt: Timestamp | null;
+  lastMessageAt: Timestamp | null;
+  // Legacy fields for backward compatibility (not stored in new conversations)
+  participants?: string[];
+  participantNames?: Record<string, string>;
+  lastMessageTime?: Timestamp | null;
+  lastSenderId?: string;
+  unreadCount?: Record<string, number>;
+  createdAt?: Timestamp | null;
 }
 
 export interface ChatMessage {
   id: string;
   senderId: string;
-  senderName: string;
   text: string;
   attachmentUrl: string | null;
   attachmentName: string | null;
-  attachmentType: 'image' | 'file' | null;
-  createdAt: Timestamp | null;
-  deletedAt: Timestamp | null;
+  sentAt: Timestamp | null;
+  // Legacy fields for backward compatibility
+  senderName?: string;
+  attachmentType?: 'image' | 'file' | null;
+  createdAt?: Timestamp | null;
+  deletedAt?: Timestamp | null;
 }
 
 // ─── Conversation helpers ─────────────────────────────────────────────────────
@@ -85,8 +82,8 @@ export function subscribeToConversations(
 ): () => void {
   const q = query(
     collection(db, 'conversations'),
-    where('participants', 'array-contains', userId),
-    orderBy('lastMessageTime', 'desc'),
+    where('participantIds', 'array-contains', userId),
+    orderBy('lastMessageAt', 'desc'),
     limit(50)
   );
 
@@ -119,33 +116,27 @@ export async function getOrCreateConversation(
   // Check for existing conversation with both participants
   const q = query(
     collection(db, 'conversations'),
-    where('participants', 'array-contains', currentUserId)
+    where('participantIds', 'array-contains', currentUserId)
   );
   const snap = await getDocs(q);
 
   for (const d of snap.docs) {
     const data = d.data() as Omit<Conversation, 'id'>;
     if (
-      data.participants.length === 2 &&
-      data.participants.includes(otherUserId)
+      data.participantIds &&
+      data.participantIds.length === 2 &&
+      data.participantIds.includes(otherUserId)
     ) {
       return d.id;
     }
   }
 
-  // Create new conversation
+  // Create new conversation with required schema
   const convRef = doc(collection(db, 'conversations'));
   await setDoc(convRef, {
-    participants: [currentUserId, otherUserId],
-    participantNames: {
-      [currentUserId]: currentUserName,
-      [otherUserId]: otherUserName,
-    },
+    participantIds: [currentUserId, otherUserId],
     lastMessage: '',
-    lastMessageTime: serverTimestamp(),
-    lastSenderId: '',
-    unreadCount: { [currentUserId]: 0, [otherUserId]: 0 },
-    createdAt: serverTimestamp(),
+    lastMessageAt: serverTimestamp(),
   });
 
   return convRef.id;
@@ -174,7 +165,7 @@ export function subscribeToMessages(
 ): () => void {
   const q = query(
     collection(db, 'conversations', conversationId, 'messages'),
-    orderBy('createdAt', 'asc'),
+    orderBy('sentAt', 'asc'),
     limit(200)
   );
 
@@ -209,20 +200,16 @@ export async function sendTextMessage(
   const msgRef = collection(db, 'conversations', conversationId, 'messages');
   await addDoc(msgRef, {
     senderId,
-    senderName,
     text: trimmed,
     attachmentUrl: null,
     attachmentName: null,
-    attachmentType: null,
-    createdAt: serverTimestamp(),
-    deletedAt: null,
+    sentAt: serverTimestamp(),
   });
 
   // Update conversation metadata
   await updateDoc(doc(db, 'conversations', conversationId), {
     lastMessage: trimmed,
-    lastMessageTime: serverTimestamp(),
-    lastSenderId: senderId,
+    lastMessageAt: serverTimestamp(),
   });
 }
 
@@ -255,25 +242,20 @@ export async function sendAttachmentMessage(
   });
 
   const downloadUrl = await getDownloadURL(storageRef);
-  const isImage = mimeType.startsWith('image/');
 
   const msgRef = collection(db, 'conversations', conversationId, 'messages');
   await addDoc(msgRef, {
     senderId,
-    senderName,
     text: captionText.trim(),
     attachmentUrl: downloadUrl,
     attachmentName: fileName,
-    attachmentType: isImage ? 'image' : 'file',
-    createdAt: serverTimestamp(),
-    deletedAt: null,
+    sentAt: serverTimestamp(),
   });
 
   const preview = captionText.trim() || `📎 ${fileName}`;
   await updateDoc(doc(db, 'conversations', conversationId), {
     lastMessage: preview,
-    lastMessageTime: serverTimestamp(),
-    lastSenderId: senderId,
+    lastMessageAt: serverTimestamp(),
   });
 }
 
@@ -293,11 +275,9 @@ export async function deleteOwnMessage(
     messageId
   );
   await updateDoc(msgRef, {
-    deletedAt: serverTimestamp(),
     text: '',
     attachmentUrl: null,
     attachmentName: null,
-    attachmentType: null,
   });
 }
 
@@ -309,17 +289,28 @@ export async function fetchAllUsers(
   currentUserId: string
 ): Promise<Array<{ uid: string; name: string; email: string; role: string }>> {
   const snap = await getDocs(collection(db, 'users'));
-  const users: Array<{ uid: string; name: string; email: string; role: string }> = [];
-  snap.forEach((d) => {
-    if (d.id !== currentUserId) {
-      const data = d.data();
-      users.push({
-        uid: d.id,
-        name: data.name || 'Unknown User',
+
+  const users: Array<{
+    uid: string;
+    name: string;
+    email: string;
+    role: string;
+  }> = [];
+
+  snap.forEach((docSnap) => {
+    const data = docSnap.data();
+
+    // Only exclude the current user by UID
+    if (docSnap.id !== currentUserId) {
+      const user = {
+        uid: docSnap.id,
+        name: data.name || data.displayName || 'Unknown User',
         email: data.email || '',
         role: data.role || 'student',
-      });
+      };
+      users.push(user);
     }
   });
+
   return users;
 }
