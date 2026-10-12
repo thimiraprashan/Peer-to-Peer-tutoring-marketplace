@@ -23,6 +23,56 @@ export const getTutorBookings = async (tutorId) => {
 };
 
 /**
+ * Fetch all bookings that belong to a specific student.
+ * @param {string} studentId - The student's Firestore UID.
+ * @returns {Promise<Array>} List of booking objects sorted by date desc.
+ */
+export const getStudentBookings = async (studentId) => {
+  try {
+    const q = query(
+      collection(db, 'bookings'),
+      where('studentId', '==', studentId)
+    );
+    const snapshot = await getDocs(q);
+    const bookings = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+    // Sort newest first
+    return bookings.sort((a, b) => {
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return dateB - dateA;
+    });
+  } catch (error) {
+    console.error('Error fetching student bookings:', error);
+    return [];
+  }
+};
+
+/**
+ * Cancel a booking and notify the tutor.
+ */
+export const cancelBooking = async (bookingId, tutorId, studentName) => {
+  try {
+    await updateDoc(doc(db, 'bookings', bookingId), { status: 'cancelled' });
+    try {
+      await addDoc(collection(db, 'notifications'), {
+        userId: tutorId,
+        type: 'booking_cancelled',
+        message: `${studentName || 'A student'} cancelled their booking.`,
+        bookingId,
+        read: false,
+        createdAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.warn('Could not create cancellation notification:', e);
+    }
+    return true;
+  } catch (error) {
+    console.error('Error cancelling booking:', error);
+    throw error;
+  }
+};
+
+/**
  * Update a booking's status (approve / reject / reschedule) and
  * also create a notification for the student.
  * Required by cross-member agreement: whoever changes status must notify the other party.
